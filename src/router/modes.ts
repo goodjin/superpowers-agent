@@ -1,87 +1,102 @@
 import type { WorkflowGate, WorkflowMode } from "../state/types"
 
+export const AGENT_SKILL_MAP = {
+  "sp-designer": "superpowers-brainstorming",
+  "sp-planner": "superpowers-writing-plans",
+  "sp-debugger": "superpowers-systematic-debugging",
+  "sp-investigator": "superpowers-dispatching-parallel-agents",
+  "sp-implementer": "superpowers-test-driven-development",
+  "sp-spec-reviewer": "superpowers-requesting-code-review",
+  "sp-code-reviewer": "superpowers-requesting-code-review",
+  "sp-verifier": "superpowers-verification-before-completion",
+  "sp-finisher": "superpowers-finishing-a-development-branch",
+} as const
+
+export type NodeAgentName = keyof typeof AGENT_SKILL_MAP
+
 export type ModeDefinition = {
   mode: WorkflowMode
   phase: string
-  agent: string
+  agent: "super-agent" | NodeAgentName
   skills: string[]
+  primary_skill?: string
   required_gates: WorkflowGate[]
   next: string
+}
+
+function nodeMode(args: {
+  mode: WorkflowMode
+  phase: string
+  agent: NodeAgentName
+  required_gates: WorkflowGate[]
+  next: string
+}): ModeDefinition {
+  const primarySkill = AGENT_SKILL_MAP[args.agent]
+  return {
+    ...args,
+    primary_skill: primarySkill,
+    skills: [primarySkill],
+  }
 }
 
 export const MODE_DEFINITIONS: Record<WorkflowMode, ModeDefinition> = {
   idle: {
     mode: "idle",
     phase: "clarify",
-    agent: "superpowers",
-    skills: ["superpowers-using-superpowers"],
+    agent: "super-agent",
+    skills: [],
     required_gates: [],
-    next: "Ask one clarifying question.",
+    next: "Clarify intent, detect existing workflow state, and ask for confirmation before dispatch.",
   },
-  design: {
+  design: nodeMode({
     mode: "design",
     phase: "explore",
     agent: "sp-designer",
-    skills: ["superpowers-brainstorming"],
-    required_gates: ["design_approved"],
-    next: "Create and record an approved design before implementation.",
-  },
-  plan: {
+    required_gates: ["request_confirmed", "design_approved", "spec_written"],
+    next: "Create the design/spec artifact and record design gates.",
+  }),
+  plan: nodeMode({
     mode: "plan",
     phase: "write-plan",
     agent: "sp-planner",
-    skills: ["superpowers-writing-plans"],
-    required_gates: ["plan_written"],
-    next: "Write and record an implementation plan artifact.",
-  },
-  execute: {
+    required_gates: ["request_confirmed", "plan_written"],
+    next: "Write the implementation plan and task graph artifact.",
+  }),
+  execute: nodeMode({
     mode: "execute",
     phase: "run-task",
     agent: "sp-implementer",
-    skills: ["superpowers-test-driven-development", "superpowers-executing-plans"],
-    required_gates: ["plan_written", "red_test_seen", "spec_review_passed", "code_review_passed"],
-    next: "Run one planned task, then record implementation and review evidence.",
-  },
-  debug: {
+    required_gates: ["plan_written", "red_test_seen", "implementation_done"],
+    next: "Execute one runnable task with TDD and record evidence.",
+  }),
+  debug: nodeMode({
     mode: "debug",
     phase: "find-root-cause",
     agent: "sp-debugger",
-    skills: ["superpowers-systematic-debugging"],
-    required_gates: ["root_cause_found"],
-    next: "Find and record root cause before proposing a fix.",
-  },
-  "parallel-investigate": {
+    required_gates: ["request_confirmed", "root_cause_found"],
+    next: "Find and record root cause before repair.",
+  }),
+  "parallel-investigate": nodeMode({
     mode: "parallel-investigate",
-    phase: "prove-independence",
-    agent: "superpowers",
-    skills: ["superpowers-dispatching-parallel-agents"],
-    required_gates: ["worktree_ready"],
-    next: "Prove independent domains and no shared write conflicts before dispatch.",
-  },
-  review: {
+    phase: "investigate",
+    agent: "sp-investigator",
+    required_gates: ["request_confirmed"],
+    next: "Run read-only investigation for one independent problem domain.",
+  }),
+  review: nodeMode({
     mode: "review",
-    phase: "review-findings",
-    agent: "sp-code-reviewer",
-    skills: ["superpowers-requesting-code-review", "superpowers-receiving-code-review"],
+    phase: "spec-review",
+    agent: "sp-spec-reviewer",
     required_gates: ["spec_review_passed", "code_review_passed"],
-    next: "Resolve critical and important review findings before continuing.",
-  },
-  "verify-finish": {
+    next: "Run serial spec review first, then code review if spec review passes.",
+  }),
+  "verify-finish": nodeMode({
     mode: "verify-finish",
     phase: "fresh-verification",
     agent: "sp-verifier",
-    skills: ["superpowers-verification-before-completion", "superpowers-finishing-a-development-branch"],
     required_gates: ["verification_fresh"],
-    next: "Run fresh verification and record the evidence before claiming completion.",
-  },
-  "skill-authoring": {
-    mode: "skill-authoring",
-    phase: "pressure-scenario",
-    agent: "sp-planner",
-    skills: ["superpowers-writing-skills"],
-    required_gates: ["spec_written", "verification_fresh"],
-    next: "Define pressure scenario, baseline failure, and compliance verification.",
-  },
+    next: "Run fresh verification; dispatch back to implementation when verification fails.",
+  }),
 }
 
 export function modeDefinition(mode: WorkflowMode): ModeDefinition {

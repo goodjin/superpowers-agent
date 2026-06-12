@@ -1,8 +1,8 @@
 # Superpowers Controller for OpenCode
 
-Superpowers Controller for OpenCode is a workflow controller plugin for OpenCode.
+Superpowers Controller for OpenCode is an OpenCode workflow-control plugin.
 
-It builds on the Superpowers methodology, but it is not the upstream Superpowers plugin. The upstream skills mainly provide working methods. This plugin adds a lightweight state machine, routing layer, and gate system on top, so design, planning, debugging, TDD, review, and verification steps have project-local state, evidence, and enforcement.
+It builds on the Superpowers methodology, but it is a separate project from the upstream Superpowers plugin. Upstream skills provide working methods. This plugin adds a lightweight state machine, routing layer, session-control layer, and gate system so design, planning, debugging, TDD, review, and verification steps have project-local state, evidence, and enforcement.
 
 One-sentence positioning:
 
@@ -16,9 +16,15 @@ One-sentence positioning:
 
 ## Purpose
 
-Agent workflows often fail because the process only lives in prompts. As context grows, or when the user says "continue", the model can skip design, write code without a plan, fix bugs without root cause, or claim completion without fresh verification.
+Agent workflows often fail because the process only lives in prompts. Long context, interrupted work, and a vague "continue" can make a model skip design, start coding without a plan, fix a bug without a root cause, or claim completion without fresh verification.
 
-This plugin keeps workflow state in the project:
+Final design document:
+
+```text
+docs/superpowers/specs/2026-06-11-controller-final-design.md
+```
+
+The plugin stores workflow state in the project:
 
 ```text
 .opencode/superpowers/current.json
@@ -28,50 +34,51 @@ This plugin keeps workflow state in the project:
 
 It records:
 
-- Workflow mode: `design`, `plan`, `execute`, `debug`, `parallel-investigate`, `review`, `verify-finish`, `skill-authoring`
-- Phase and next step
+- Current workflow: `feature`, `debug`, `plan-only`, `review`, `verify-finish`, `parallel-investigate`
+- Current phase and routing state
 - Gates such as `design_approved`, `plan_written`, `root_cause_found`, `red_test_seen`, `verification_fresh`
-- Artifacts such as spec, plan, root cause, red test log, review, verification log
+- Node artifacts such as spec, plan, root cause, red test log, review, and verification log
 - History for recovery and explanation
 
 ## Design
 
-The plugin splits the workflow into four layers:
+The workflow is split into layers:
 
 ```text
-Command -> Controller Agent -> Node Agent -> Skill
+Command -> super-agent -> Node Session -> Node Agent -> Primary Skill
              |
              v
-       State / Router / Gate
+       State / Router / Gate / Session Control
 ```
 
 Layer responsibilities:
 
 - **Command**: user entrypoint, such as `/sp-debug` or `/sp-plan`.
-- **Controller agent**: `superpowers`; reads state and calls `sp_route` / `sp_next`; it does not directly implement code.
+- **super-agent**: primary controller in the main session. It confirms intent, restores state, and creates or reuses child sessions. It does not write code.
 - **Node agent**: focused role such as `sp-debugger` or `sp-implementer`.
-- **Skill**: method instructions for a node, such as systematic debugging, TDD, or verification.
-- **Plugin state/gate**: stores state, writes artifacts, validates gates, and intercepts unsafe tool calls.
+- **Skill**: node method, such as systematic debugging, TDD, or verification.
+- **Plugin state/gate/session control**: stores state, writes artifacts, validates gates, creates or reuses sessions, and intercepts unsafe tool calls.
 
-The model handles local reasoning and node output. The plugin handles workflow reliability.
+The model executes node work and submits normalized results through `sp_record`. The plugin owns state, routing, session creation, retry decisions, and persistence.
 
 ## Agents and Skills
 
-The plugin dynamically injects 9 agents:
+The plugin dynamically injects these agents:
 
 | Agent | Role |
 |---|---|
-| `superpowers` | controller / primary agent |
-| `sp-designer` | design node |
-| `sp-planner` | plan / skill-authoring node |
-| `sp-debugger` | debug node |
-| `sp-implementer` | execute / TDD node |
+| `super-agent` | primary workflow controller |
+| `sp-designer` | design/spec node |
+| `sp-planner` | plan and task graph node |
+| `sp-debugger` | root-cause debugging node |
+| `sp-investigator` | read-only parallel investigation node |
+| `sp-implementer` | implementation / TDD node |
 | `sp-spec-reviewer` | spec compliance review |
 | `sp-code-reviewer` | code quality review |
-| `sp-verifier` | verification node |
-| `sp-finisher` | finish / branch completion |
+| `sp-verifier` | fresh verification node |
+| `sp-finisher` | finish / branch completion node |
 
-It bundles 14 `superpowers-*` skills:
+It bundles 13 `superpowers-*` skills:
 
 - `superpowers-brainstorming`
 - `superpowers-writing-plans`
@@ -86,17 +93,26 @@ It bundles 14 `superpowers-*` skills:
 - `superpowers-finishing-a-development-branch`
 - `superpowers-using-git-worktrees`
 - `superpowers-using-superpowers`
-- `superpowers-writing-skills`
 
-Agents and skills are separate layers. An agent is a role. A skill is the method it should follow.
+Agents and skills are separate layers. An agent is a role. A skill is the method used by that role.
 
-Agent prompts do not copy whole skill bodies. They are lightweight role prompts designed for this plugin: they state the agent's purpose, which skills it should load, and that it must call `sp_record` before ending a node. Detailed workflow behavior remains in the skill files.
+Agent prompts do not copy full skill bodies. They are lightweight role rules that state the agent purpose, permissions, primary skill, and `sp_record` requirement. Detailed workflow behavior remains in the skill files. The final design keeps one primary skill per node session; if another skill is needed, the plugin creates another node session.
 
-When an active workflow exists, the plugin also injects runtime skill context. It comes from the same `MODE_DEFINITIONS` source and includes the current mode, phase, agent, `primary_skill`, `supporting_skills`, and session policy. Agent prompts, router decisions, `sp_next`, and runtime system context now read from the same skill map.
+The plugin injects runtime skill context when a workflow is active. That context comes from the same node definition used by the router, agent prompts, node task packets, and `sp_next`, which avoids drift between routing and prompt text.
 
-The current policy is: prefer one primary skill per session. If a supporting skill requires substantial independent work, create or route a separate subagent session for it. This is runtime guidance, not a hard second-skill blocker yet. A hard guarantee requires intercepting OpenCode `skill` tool calls and tracking loaded skills per session.
+Example:
 
-If a user directly selects a node agent such as `sp-debugger`, that agent still follows its role prompt and loads its mapped skill. Direct selection skips the controller's initial routing UX, so `/sp` or `/sp-debug` is preferred. Gate enforcement still lives in the plugin hook.
+```text
+/sp-debug
+  -> super-agent confirms the debug workflow
+  -> plugin creates the workflow run
+  -> sp-debugger
+  -> primary skill: superpowers-systematic-debugging
+  -> sp_record submits the root_cause artifact
+  -> plugin writes the artifact, opens the root_cause_found gate, and schedules the next step
+```
+
+If the user directly selects a node agent such as `sp-debugger`, the node agent still sees its role prompt and primary skill. Direct selection skips the controller's intent confirmation and recovery logic, so `/sp` or `/sp-debug` is the preferred entrypoint.
 
 ## Commands
 
@@ -113,18 +129,18 @@ Injected slash commands:
 - `/sp-verify`
 - `/sp-reset`
 
-## Why not just use Superpowers skills directly?
+## Why use this instead of skills directly?
 
-Direct skills are good when you only need method instructions.
+Direct Superpowers skills are a good fit when you already know the process and only need method instructions.
 
-This plugin helps when work is longer, more stateful, or easier to interrupt:
+This plugin helps with longer, stateful, or interruptible work:
 
-- "Continue" resumes from workflow state instead of reclassifying from scratch.
-- Writes, repairs, and completion records go through gates.
-- Node outputs are recorded through `sp_record`.
-- Parallel investigation requires an independence and write-conflict check.
-- Multiple agents have fixed responsibilities.
-- State and artifacts remain in the project for recovery.
+- "Continue" resumes from workflow state instead of guessing intent again.
+- Writes, repair work, and completion claims go through gates.
+- Each node records artifacts and evidence through `sp_record`.
+- Parallel investigation requires independent problem domains and no shared write conflict.
+- Review and verification are separate roles, so implementation does not silently approve itself.
+- Project-local `state.json` and artifacts give later sessions something concrete to recover from.
 
 ## Install
 
@@ -138,6 +154,26 @@ Check installation:
 bunx opencode-superpowers-controller doctor
 ```
 
+## Configuration
+
+Default mode is guided: gate issues are reported but not blocked. You can make individual gates strict:
+
+```jsonc
+{
+  "mode": "guided",
+  "tdd": "strict",
+  "design_gate": "guided",
+  "debug_gate": "guided",
+  "verification_gate": "guided",
+  "state": {
+    "scope": "project",
+    "retention_days": 30
+  }
+}
+```
+
+`strict` blocks the tool call. `guided` records a warning. `off` disables that gate.
+
 ## Development
 
 ```bash
@@ -147,10 +183,10 @@ bun run build
 bun run e2e:opencode
 ```
 
-The OpenCode 1.16.2 e2e runtime is stored in:
+The isolated OpenCode 1.16.2 runtime is stored in:
 
 ```text
 tools/opencode-1.16.2/
 ```
 
-The e2e smoke uses temporary `HOME` and `XDG_CONFIG_HOME`, loads `file://dist/index.js`, and verifies that OpenCode 1.16.2 can see the 9 dynamically injected agents. It does not require a model account and does not modify the real OpenCode config.
+The smoke e2e uses temporary `HOME` and `XDG_CONFIG_HOME`, loads `file://dist/index.js`, and verifies that OpenCode 1.16.2 can see the 10 dynamically injected agents. It does not require a model account and does not modify the real OpenCode config.

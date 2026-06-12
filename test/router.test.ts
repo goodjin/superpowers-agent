@@ -57,7 +57,7 @@ describe("routeWorkflow", () => {
     const route = routeWorkflow({ request: "investigate frontend and backend failures in parallel" })
 
     expect(route.mode).toBe("parallel-investigate")
-    expect(route.agent).toBe("superpowers")
+    expect(route.agent).toBe("sp-investigator")
     expect(route.skills).toContain("superpowers-dispatching-parallel-agents")
   })
 
@@ -66,6 +66,6 @@ describe("routeWorkflow", () => {
 
     expect(route.mode).toBe("idle")
     expect(route.phase).toBe("clarify")
-    expect(route.agent).toBe("superpowers")
+    expect(route.agent).toBe("super-agent")
   })
 })

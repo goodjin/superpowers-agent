@@ -3,7 +3,7 @@ import { buildRuntimeSkillInjection } from "../src/skills/runtime-injection"
 import { createInitialState } from "../src/state/transitions"
 
 describe("buildRuntimeSkillInjection", () => {
-  test("injects required skills and single-session policy for active workflow", () => {
+  test("injects primary skill and controller-owned field policy for active workflow", () => {
     const state = createInitialState({
       id: "run-1",
       project: "/repo",
@@ -16,8 +16,9 @@ describe("buildRuntimeSkillInjection", () => {
 
     expect(injection).toContain("<superpowers-controller-runtime>")
     expect(injection).toContain("primary_skill: superpowers-test-driven-development")
-    expect(injection).toContain("supporting_skills: superpowers-executing-plans")
+    expect(injection).toContain("supporting_skills: none")
     expect(injection).toContain("one primary skill per session")
     expect(injection).toContain("create or route a separate subagent session")
+    expect(injection).toContain("Do not include next_action")
   })
 })

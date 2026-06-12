@@ -7,6 +7,7 @@ import { DEFAULT_CONFIG } from "../config/defaults"
 
 export const PACKAGE_NAME = "opencode-superpowers-controller"
 export const CONFIG_FILE_NAME = "opencode-superpowers.jsonc"
+const EXCLUDED_SKILL_DIRS = new Set(["superpowers-writing-skills"])
 
 export function mergePluginEntry(content: string, pluginEntry = PACKAGE_NAME): string {
   const parsed = parse(content)
@@ -55,6 +56,7 @@ function copyAssetTree(kind: "skills", destinationRoot: string): void {
 function copyDirectory(source: string, destination: string): void {
   mkdirSync(destination, { recursive: true })
   for (const entry of readdirSync(source)) {
+    if (EXCLUDED_SKILL_DIRS.has(entry)) continue
     const sourcePath = join(source, entry)
     const destinationPath = join(destination, entry)
     if (statSync(sourcePath).isDirectory()) {

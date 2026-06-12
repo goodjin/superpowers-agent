@@ -16,7 +16,7 @@ export function createRouteTool(store: ProjectStore): ToolDefinition {
         command: args.command,
         currentState: store.readCurrent(),
       })
-      if (decision.mode !== "idle" && decision.reason.startsWith("matched")) {
+      if (decision.mode !== "idle" && (decision.reason.startsWith("matched") || decision.reason.startsWith("explicit command"))) {
         store.start({
           session: args.session ?? context.sessionID,
           mode: decision.mode,

@@ -8,6 +8,7 @@ const COMMAND_MODES: Record<string, WorkflowMode> = {
   "/sp-execute": "execute",
   "/sp-review": "review",
   "/sp-verify": "verify-finish",
+  "/sp-verify-finish": "verify-finish",
 }
 
 const MODE_PATTERNS: Array<{ mode: WorkflowMode; patterns: RegExp[] }> = [
@@ -18,10 +19,6 @@ const MODE_PATTERNS: Array<{ mode: WorkflowMode; patterns: RegExp[] }> = [
   {
     mode: "debug",
     patterns: [/\bbug\b/i, /\bfail(?:s|ed|ure)?\b/i, /\bcrash\b/i, /\berror\b/i, /\bunexpected\b/i, /\bperformance\b/i],
-  },
-  {
-    mode: "skill-authoring",
-    patterns: [/\bcreate skill\b/i, /\bupdate skill\b/i, /\bwrite(?:ing)? skills?\b/i],
   },
   {
     mode: "verify-finish",

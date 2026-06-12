@@ -11,8 +11,6 @@ const GATE_ARTIFACTS: Partial<Record<WorkflowGate, WorkflowArtifact>> = {
   verification_fresh: "verification_log",
 }
 
-const COMPLETION_EVENTS = new Set(["done", "pass", "passed", "fixed", "complete", "completed"])
-
 export function createInitialState(args: {
   id: string
   project: string
@@ -34,7 +32,6 @@ export function createInitialState(args: {
     gates: args.gates ?? {},
     artifacts: {},
     history: [{ at: now, event: "created", to: args.mode }],
-    runtime: { skills_used: [] },
   }
 }
 
@@ -45,7 +42,7 @@ export function applyRecord(state: WorkflowState, record: WorkflowRecord): Workf
     throw new Error("sp_record rejected: too many gates updated in one record")
   }
 
-  if (COMPLETION_EVENTS.has(record.event.toLowerCase()) && state.gates.verification_fresh !== true) {
+  if (record.event === "finish" && record.status === "passed" && state.gates.verification_fresh !== true) {
     throw new Error("sp_record rejected: verification_fresh is required before completion records")
   }
 
@@ -58,18 +55,15 @@ export function applyRecord(state: WorkflowState, record: WorkflowRecord): Workf
 
   const now = new Date().toISOString()
   const artifactRefs = normalizeArtifactRefs(record.artifacts ?? {})
-  const nextPhase = record.phase ?? state.phase
+  const nextPhase = phaseForRecord(state.mode, record)
   return {
     ...state,
     phase: nextPhase,
     updated_at: now,
     gates: { ...state.gates, ...gateUpdates },
     artifacts: { ...state.artifacts, ...artifactRefs },
-    runtime: {
-      ...state.runtime,
-      skills_used: Array.from(new Set([...(state.runtime?.skills_used ?? []), ...(record.skills_used ?? [])])),
-    },
-    next: record.next ?? state.next,
+    task_graph: record.task_graph ?? state.task_graph,
+    pending_question: record.status === "needs_user" ? record.question : undefined,
     history: [
       ...state.history,
       {
@@ -77,7 +71,8 @@ export function applyRecord(state: WorkflowState, record: WorkflowRecord): Workf
         event: record.event,
         from: state.phase,
         to: nextPhase,
-        reason: record.reason,
+        status: record.status,
+        summary: record.summary,
       },
     ],
   }
@@ -102,14 +97,43 @@ function initialPhase(mode: WorkflowMode): string {
     case "debug":
       return "find-root-cause"
     case "parallel-investigate":
-      return "prove-independence"
+      return "investigate"
     case "review":
-      return "review-findings"
+      return "spec-review"
     case "verify-finish":
       return "fresh-verification"
-    case "skill-authoring":
-      return "pressure-scenario"
     default:
       return "idle"
+  }
+}
+
+function phaseForRecord(stateMode: WorkflowMode, record: WorkflowRecord): string {
+  if (record.status === "needs_user") return "waiting-user"
+  if (record.status === "blocked") return "blocked"
+  switch (record.event) {
+    case "intake":
+      return "confirmed"
+    case "design":
+      return record.status === "passed" ? "design-complete" : "design-retry"
+    case "plan":
+      return record.status === "passed" ? "plan-complete" : "plan-retry"
+    case "debug":
+      return record.status === "passed" ? "root-cause-found" : "debug-retry"
+    case "red-test":
+      return "red-test-recorded"
+    case "implementation":
+      return record.status === "passed" ? "implementation-complete" : "implementation-retry"
+    case "spec-review":
+      return record.status === "passed" ? "spec-review-passed" : "implementation-retry"
+    case "code-review":
+      return record.status === "passed" ? "code-review-passed" : "implementation-retry"
+    case "verification":
+      return record.status === "passed" ? "verification-passed" : "implementation-retry"
+    case "finish":
+      return record.status === "passed" ? "finished" : "finish-blocked"
+    case "question":
+      return "waiting-user"
+    default:
+      return initialPhase(stateMode)
   }
 }

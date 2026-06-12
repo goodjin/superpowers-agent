@@ -1,19 +1,43 @@
 import { describe, expect, test } from "bun:test"
 import { createAgentConfig } from "../src/agents"
-import { MODE_DEFINITIONS } from "../src/router/modes"
+import { AGENT_SKILL_MAP } from "../src/router/modes"
 
 describe("createAgentConfig", () => {
-  test("node agent prompts include every skill declared by the shared mode map", () => {
+  test("injects the final controller and node agents", () => {
     const agents = createAgentConfig()
 
-    for (const mode of Object.values(MODE_DEFINITIONS)) {
-      if (mode.agent === "superpowers") continue
-      const agent = agents[mode.agent]
-      expect(agent, `${mode.agent} should be injected`).toBeDefined()
+    expect(Object.keys(agents).sort()).toEqual([
+      "sp-code-reviewer",
+      "sp-debugger",
+      "sp-designer",
+      "sp-finisher",
+      "sp-implementer",
+      "sp-investigator",
+      "sp-planner",
+      "sp-spec-reviewer",
+      "sp-verifier",
+      "super-agent",
+    ])
+  })
+
+  test("node agent prompts include exactly one primary skill from the shared skill map", () => {
+    const agents = createAgentConfig()
+
+    for (const [agentName, primarySkill] of Object.entries(AGENT_SKILL_MAP)) {
+      const agent = agents[agentName]
+      expect(agent, `${agentName} should be injected`).toBeDefined()
       const prompt = String(agent.prompt ?? "")
-      for (const skill of mode.skills) {
-        expect(prompt, `${mode.agent} should load ${skill}`).toContain(skill)
-      }
+      expect(prompt, `${agentName} should load ${primarySkill}`).toContain(primarySkill)
+      expect(prompt, `${agentName} should describe one primary skill`).toContain("Primary skill:")
+      expect(prompt, `${agentName} should not mention control-plane fields`).toContain("Do not include next_action")
     }
+  })
+
+  test("controller cannot mutate code directly", () => {
+    const controller = createAgentConfig()["super-agent"]
+
+    expect(controller?.mode).toBe("primary")
+    expect((controller?.permission as { edit?: string } | undefined)?.edit).toBe("deny")
+    expect(String(controller?.prompt ?? "")).toContain("create or reuse child sessions")
   })
 })

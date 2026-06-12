@@ -17,7 +17,7 @@ export function createCommandConfig(): CommandConfigRecord {
       name,
       {
         description,
-        agent: "superpowers",
+        agent: "super-agent",
         template,
       },
     ]),

@@ -29,10 +29,11 @@ if (agents.status !== 0) {
 }
 
 for (const name of [
-  "superpowers",
+  "super-agent",
   "sp-designer",
   "sp-planner",
   "sp-debugger",
+  "sp-investigator",
   "sp-implementer",
   "sp-spec-reviewer",
   "sp-code-reviewer",
@@ -44,7 +45,7 @@ for (const name of [
   }
 }
 
-console.log("OpenCode 1.16.2 e2e smoke passed: plugin loaded and 9 agents were dynamically injected.")
+console.log("OpenCode 1.16.2 e2e smoke passed: plugin loaded and 10 agents were dynamically injected.")
 
 function isolatedEnv(home: string): NodeJS.ProcessEnv {
   return {

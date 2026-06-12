@@ -12,14 +12,17 @@ describe("applyRecord", () => {
     })
 
     const next = applyRecord(state, {
-      event: "root-cause-found",
+      event: "debug",
+      status: "passed",
+      summary: "Root cause found.",
       artifacts: { root_cause: "The parser treats protocol JSON as text." },
       gates: { root_cause_found: true },
     })
 
     expect(next.gates.root_cause_found).toBe(true)
     expect(next.artifacts.root_cause).toBe("root_cause.md")
-    expect(next.history.at(-1)?.event).toBe("root-cause-found")
+    expect(next.history.at(-1)?.event).toBe("debug")
+    expect(next.history.at(-1)?.status).toBe("passed")
   })
 
   test("rejects evidence-backed gate without matching artifact", () => {
@@ -33,7 +36,9 @@ describe("applyRecord", () => {
 
     expect(() =>
       applyRecord(state, {
-        event: "root-cause-found",
+        event: "debug",
+        status: "passed",
+        summary: "Root cause found.",
         gates: { root_cause_found: true },
       }),
     ).toThrow("root_cause")
@@ -50,7 +55,9 @@ describe("applyRecord", () => {
 
     expect(() =>
       applyRecord(state, {
-        event: "bulk-update",
+        event: "implementation",
+        status: "passed",
+        summary: "Bulk update.",
         gates: {
           design_approved: true,
           spec_written: true,
@@ -77,8 +84,10 @@ describe("applyRecord", () => {
 
     expect(() =>
       applyRecord(state, {
-        event: "done",
-        artifacts: { patch_summary: "Implemented plugin MVP." },
+        event: "finish",
+        status: "passed",
+        summary: "Ready to finish.",
+        artifacts: { finish_note: "Implemented plugin MVP." },
       }),
     ).toThrow("verification_fresh")
   })

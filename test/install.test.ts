@@ -47,6 +47,7 @@ describe("mergePluginEntry", () => {
     const commands = existsSync(commandsDir) ? readdirSync(commandsDir).filter((entry) => entry.startsWith("sp")) : []
 
     expect(skills.length).toBeGreaterThan(0)
+    expect(skills).not.toContain("superpowers-writing-skills")
     expect(commands).toHaveLength(0)
   })
 })
