@@ -1,3 +1,5 @@
+import "@opentui/solid/runtime-plugin-support"
+import { createElement, insert } from "@opentui/solid"
 import { createNodeProgressStore } from "./progress/node-progress"
 import { createProjectStore } from "./state/store"
 import { buildProgressPanelViewModel, renderCompactProgressText, renderProgressPanelText } from "./tui/progress-panel"
@@ -47,8 +49,8 @@ export function createTuiPluginModule() {
       ]))
       api.slots?.register({
         slots: {
-          session_prompt_right: (_context, props) => renderCompactProgressText(currentProgressModel(api, props?.session_id)),
-          sidebar_footer: (_context, props) => renderCompactProgressText(currentProgressModel(api, props?.session_id)),
+          session_prompt_right: createCompactProgressSlot(api),
+          sidebar_footer: createCompactProgressSlot(api),
         },
       })
       if (api.command) {
@@ -67,6 +69,30 @@ export function createTuiPluginModule() {
       })
     },
   }
+}
+
+export function createCompactProgressSlot(
+  api: TuiApi,
+  renderText: (value: string) => unknown = createTextElement,
+): (_context?: unknown, props?: Record<string, unknown>) => unknown {
+  return (_context, props) => {
+    const text = safeCompactProgressText(api, props?.session_id)
+    return text ? renderText(text) : null
+  }
+}
+
+function safeCompactProgressText(api: TuiApi, sessionID?: unknown): string {
+  try {
+    return renderCompactProgressText(currentProgressModel(api, sessionID))
+  } catch {
+    return "SP: progress unavailable"
+  }
+}
+
+function createTextElement(value: string): unknown {
+  const node = createElement("text")
+  insert(node, value)
+  return node
 }
 
 function currentProgressModel(api: TuiApi, sessionID?: unknown) {

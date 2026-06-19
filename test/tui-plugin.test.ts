@@ -4,7 +4,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { createNodeProgressStore } from "../src/progress/node-progress"
 import { createProjectStore } from "../src/state/store"
-import { createTuiPluginModule } from "../src/tui"
+import { createCompactProgressSlot, createTuiPluginModule } from "../src/tui"
 
 describe("Superpowers TUI plugin", () => {
   test("registers the progress route and persistent progress slots", async () => {
@@ -42,40 +42,41 @@ describe("Superpowers TUI plugin", () => {
         detail: "bun run test",
       })
       const plugin = createTuiPluginModule()
+      const api = {
+        route: {
+          register(input: Array<{ name: string; render: () => unknown }>) {
+            routes.push(...input)
+            return () => {}
+          },
+          navigate(name: string, params?: Record<string, unknown>) {
+            navigated.push({ name, params })
+          },
+        },
+        command: {
+          register(callback: () => Array<{ title: string; value: string; onSelect?: () => void }>) {
+            commands.push(...callback())
+            return () => {}
+          },
+        },
+        slots: {
+          register(plugin: { slots: Record<string, (_context?: unknown, props?: Record<string, unknown>) => unknown> }) {
+            Object.assign(slots, plugin.slots)
+            return "superpowers-progress-slots"
+          },
+        },
+        state: {
+          path: { directory: project },
+          session: {
+            status(sessionID: string) {
+              expect(sessionID).toBe("session-child")
+              return { type: "busy" }
+            },
+          },
+        },
+      } as never
 
       await plugin.tui(
-        {
-          route: {
-            register(input: Array<{ name: string; render: () => unknown }>) {
-              routes.push(...input)
-              return () => {}
-            },
-            navigate(name: string, params?: Record<string, unknown>) {
-              navigated.push({ name, params })
-            },
-          },
-          command: {
-            register(callback: () => Array<{ title: string; value: string; onSelect?: () => void }>) {
-              commands.push(...callback())
-              return () => {}
-            },
-          },
-          slots: {
-            register(plugin: { slots: Record<string, (_context?: unknown, props?: Record<string, unknown>) => unknown> }) {
-              Object.assign(slots, plugin.slots)
-              return "superpowers-progress-slots"
-            },
-          },
-          state: {
-            path: { directory: project },
-            session: {
-              status(sessionID: string) {
-                expect(sessionID).toBe("session-child")
-                return { type: "busy" }
-              },
-            },
-          },
-        } as never,
+        api,
         undefined,
         { id: "superpowers-controller", source: "file", spec: "", target: "", first_time: 0, last_time: 0, time_changed: 0, load_count: 1, fingerprint: "", state: "first" },
       )
@@ -84,9 +85,14 @@ describe("Superpowers TUI plugin", () => {
       expect(String(routes[0]?.render())).toContain("Superpowers Progress")
       expect(commands.map((command) => command.value)).toContain("superpowers.progress")
       expect(Object.keys(slots).sort()).toEqual(["session_prompt_right", "sidebar_footer"])
-      expect(String(slots.session_prompt_right?.(undefined, { session_id: "session-main" }))).toContain("SP: sp-implementer T1 running/busy - bash running")
-      expect(String(slots.sidebar_footer?.(undefined, { session_id: "session-main" }))).toContain("SP: sp-implementer T1 running/busy - bash running")
-      expect(String(slots.session_prompt_right?.(undefined, { session_id: "session-child" }))).toBe("")
+      expect(typeof slots.session_prompt_right).toBe("function")
+      expect(typeof slots.sidebar_footer).toBe("function")
+      const compactSlot = createCompactProgressSlot(api, (value) => ({ type: "text", value }))
+      expect(compactSlot(undefined, { session_id: "session-main" })).toEqual({
+        type: "text",
+        value: "SP: sp-implementer T1 running/busy - bash running",
+      })
+      expect(compactSlot(undefined, { session_id: "session-child" })).toBeNull()
       commands.find((command) => command.value === "superpowers.progress")?.onSelect?.()
       expect(navigated).toEqual([{ name: "superpowers-progress", params: undefined }])
     } finally {

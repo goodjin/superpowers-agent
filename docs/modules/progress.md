@@ -69,3 +69,5 @@ TUI entry 暴露在 package 的 `./tui` export。
 - `sidebar_footer`：在 session sidebar footer 显示同一行 compact progress。
 
 常驻行只显示 active workflow 中最新 running node 的 agent、task、durable/live status 和最新 progress 摘要。完整历史仍通过 `superpowers-progress` route 查看。
+
+slot render 必须返回 OpenTUI/Solid element，而不是裸字符串。TUI 入口会加载 `@opentui/solid/runtime-plugin-support`，再使用 `@opentui/solid` 创建 `text` element，并对 workflow/progress 读取异常做 fail-closed 处理；读取失败时只显示 `SP: progress unavailable`，避免异常进入 host TUI 渲染器。
