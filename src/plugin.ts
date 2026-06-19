@@ -2,6 +2,7 @@ import type { Plugin, PluginModule } from "@opencode-ai/plugin"
 import { createAgentConfig } from "./agents"
 import { createCommandConfig } from "./commands"
 import { loadConfig } from "./config/load"
+import { createNodeProgressStore } from "./progress/node-progress"
 import { evaluateToolGate } from "./router/gates"
 import { createOpenCodeSessionAdapter } from "./session/adapter"
 import { createSessionOrchestrator } from "./session/orchestrator"
@@ -13,11 +14,15 @@ export function createPluginModule(): PluginModule {
   const server: Plugin = async (ctx) => {
     const config = loadConfig(ctx.directory)
     const store = createProjectStore(ctx.directory)
+    const nodeProgress = createNodeProgressStore(ctx.directory)
     const adapter = createOpenCodeSessionAdapter(ctx as Parameters<typeof createOpenCodeSessionAdapter>[0])
     const progress = { report: adapter.showProgress }
     const orchestrator = createSessionOrchestrator(adapter)
     return {
       tool: createTools(store, orchestrator, progress),
+      event: async ({ event }) => {
+        nodeProgress.recordEvent(store.readCurrent(), event)
+      },
       config: async (hostConfig: Record<string, unknown>) => {
         hostConfig.agent = {
           ...createAgentConfig(),

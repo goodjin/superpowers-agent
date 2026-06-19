@@ -16,6 +16,11 @@
 - `test/session-orchestrator.test.ts`：node task markdown 模板、session create/reuse adapter 调用。
 - `test/store-node-runs.test.ts`：`node_runs` 创建、`nodes/*/task.md`、`nodes/*/record.json` 和完成状态更新。
 - `test/sp-record-dispatch.test.ts`：`sp_record(plan)` 后 dispatch implementer，并在 `needs_user` 时不派发。
+- `test/node-progress.test.ts`：child session 事件到节点 progress JSONL 的映射、忽略无关 session、错误摘要。
+- `test/progress-panel.test.ts`：TUI progress panel view-model 和文本渲染。
+- `test/plugin-progress-event.test.ts`：server plugin `event` hook 写入 child progress。
+- `test/tui-plugin.test.ts`：TUI route 和命令入口注册。
+- `test/package-entrypoints.test.ts`：package build/export 包含 `./tui` 入口。
 - `test/e2e/opencode-workflow.test.ts`：workflow e2e，覆盖 proposal/start、debug root cause、strict debug gate、完整 feature lifecycle、`sp_record` 校验恢复、completion verification、active waiting reroute 和 strict execute gate 顺序。
 - `scripts/e2e-opencode-mock-llm.ts`：用临时 OpenCode 配置启动真实 `opencode run`，通过 mock provider 验证 request_id 匹配。
 - `scripts/e2e-opencode-1.16.2.ts`：原有插件加载 smoke，验证 9 个动态注入 agents。
@@ -27,6 +32,12 @@ workflow progress 是 side-channel 行为，用单元测试验证，不要求 e2
 - `test/controller-intake.test.ts` 断言 `sp_route` 发送 `waiting_user_confirmation`，`sp_start` 发送 `run_started`。
 - `test/session-orchestrator.test.ts` 断言 dispatch 先发送 `dispatch_started`，成功创建 session 后发送 `node_running`。
 - `test/sp-record-dispatch.test.ts` 断言节点记录后发送 `node_recorded`，`needs_user` 决策额外发送 `waiting_user_input`。
+
+child session live progress 走事件归档，不靠 toast 断言：
+
+- `test/node-progress.test.ts` 覆盖 `message.part.updated`、`session.status`、`session.error` 等事件的归档形状。
+- `test/plugin-progress-event.test.ts` 覆盖 server hook 只处理 active workflow 中已登记的 child session。
+- `test/tui-plugin.test.ts` 覆盖 `superpowers-progress` route 和 `superpowers.progress` 命令入口。
 
 ## Mock LLM Contract
 
