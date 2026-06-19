@@ -23,16 +23,18 @@ describe("deploy-superagent-runtime", () => {
     expect(result.status, result.stderr || result.stdout).toBe(0)
 
     const configPath = join(runtimeRoot, "home", ".config", "opencode", "opencode.json")
+    const tuiConfigPath = join(runtimeRoot, "home", ".config", "opencode", "tui.json")
     const launcherPath = join(tempHome, ".local", "bin", "superagent")
     expect(existsSync(configPath)).toBe(true)
+    expect(existsSync(tuiConfigPath)).toBe(true)
     expect(existsSync(launcherPath)).toBe(true)
 
     const config = JSON.parse(readFileSync(configPath, "utf8"))
     expect(config.permission).toBe("allow")
-    expect(config.plugin).toEqual([
-      `file://${process.cwd()}/dist/index.js`,
-      `file://${process.cwd()}/dist/tui.js`,
-    ])
+    expect(config.plugin).toEqual([`file://${process.cwd()}/dist/index.js`])
+
+    const tuiConfig = JSON.parse(readFileSync(tuiConfigPath, "utf8"))
+    expect(tuiConfig.plugin).toEqual([`file://${process.cwd()}/dist/tui.js`])
 
     const launcher = readFileSync(launcherPath, "utf8")
     expect(launcher).toContain(' web --hostname "$HOSTNAME" --port "$PORT"')

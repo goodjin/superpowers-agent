@@ -33,10 +33,11 @@ const repoRoot = process.env.REPO_ROOT
 const configDir = process.env.CONFIG_DIR
 const sourcePath = `${home}/.config/opencode/opencode.json`
 const targetPath = `${configDir}/opencode.json`
+const tuiTargetPath = `${configDir}/tui.json`
 
 const target = {
   $schema: "https://opencode.ai/config.json",
-  plugin: [`file://${repoRoot}/dist/index.js`, `file://${repoRoot}/dist/tui.js`],
+  plugin: [`file://${repoRoot}/dist/index.js`],
   permission: "allow",
 }
 
@@ -54,6 +55,17 @@ if (fs.existsSync(sourcePath)) {
 }
 
 fs.writeFileSync(targetPath, JSON.stringify(target, null, 2) + "\n")
+fs.writeFileSync(
+  tuiTargetPath,
+  JSON.stringify(
+    {
+      $schema: "https://opencode.ai/tui.json",
+      plugin: [`file://${repoRoot}/dist/tui.js`],
+    },
+    null,
+    2,
+  ) + "\n",
+)
 NODE
 
   if [[ -f "$HOME/.local/share/opencode/auth.json" ]]; then
@@ -170,7 +182,7 @@ start_server() {
     cd "$PROJECT_DIR"
     export HOME="$ISOLATED_HOME"
     export XDG_CONFIG_HOME="$ISOLATED_HOME/.config"
-    nohup "$OPENCODE_BIN" web --hostname "$HOSTNAME" --port "$PORT" --print-logs --log-level INFO > "$LOG_FILE" 2>&1 &
+    nohup "$OPENCODE_BIN" serve --hostname "$HOSTNAME" --port "$PORT" --print-logs --log-level INFO > "$LOG_FILE" 2>&1 &
     echo $! > "$PID_FILE"
   )
 
