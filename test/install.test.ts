@@ -45,9 +45,29 @@ describe("mergePluginEntry", () => {
     const skills = readdirSync(join(configDir, "skills")).filter((entry) => entry.startsWith("superpowers-"))
     const commandsDir = join(configDir, "commands")
     const commands = existsSync(commandsDir) ? readdirSync(commandsDir).filter((entry) => entry.startsWith("sp")) : []
+    const primarySkills = [
+      "superpowers-brainstorming",
+      "superpowers-dispatching-parallel-agents",
+      "superpowers-finishing-a-development-branch",
+      "superpowers-requesting-code-review",
+      "superpowers-systematic-debugging",
+      "superpowers-test-driven-development",
+      "superpowers-verification-before-completion",
+      "superpowers-writing-plans",
+    ]
+    const supportSkills = [
+      "superpowers-executing-plans",
+      "superpowers-receiving-code-review",
+      "superpowers-subagent-driven-development",
+      "superpowers-using-git-worktrees",
+      "superpowers-using-superpowers",
+      "superpowers-writing-skills",
+    ]
 
-    expect(skills.length).toBeGreaterThan(0)
-    expect(skills).not.toContain("superpowers-writing-skills")
+    expect(skills.sort()).toEqual(primarySkills.sort())
+    for (const skill of supportSkills) {
+      expect(skills).not.toContain(skill)
+    }
     expect(commands).toHaveLength(0)
   })
 })

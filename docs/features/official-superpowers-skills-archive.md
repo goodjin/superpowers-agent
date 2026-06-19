@@ -13,5 +13,5 @@ The repository already bundled Superpowers runtime skills under `assets/skills/`
 ## Acceptance
 
 - The official archive contains all 14 skill directories found in the local `openai-curated/superpowers` plugin cache.
-- The docs explain that this archive is separate from `assets/skills/`, whose source bundle contains 14 skill directories while the default installer excludes `superpowers-writing-skills`.
+- The docs explain that this archive is separate from `assets/skills/`, whose runtime bundle keeps only router-assigned primary skills.
 - No runtime code or install behavior changes are required for this documentation-only archive.

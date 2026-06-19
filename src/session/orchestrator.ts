@@ -19,6 +19,7 @@ export function createSessionOrchestrator(adapter: SessionAdapter) {
       parentSessionID: string
       decision: Extract<DispatchDecision, { action: "create_session" | "reuse_session" }>
       packet: NodeTaskPacket
+      onSessionCreated?: (args: { sessionID: string; taskMarkdown: string }) => Promise<void>
     }): Promise<SessionDispatchResult> {
       const taskMarkdown = buildNodeTaskPrompt(args.packet)
       await adapter.showProgress({
@@ -49,6 +50,16 @@ export function createSessionOrchestrator(adapter: SessionAdapter) {
       const sessionID = await adapter.createNodeSession({
         parentSessionID: args.parentSessionID,
         title: `${args.packet.phase}${args.packet.task_id ? ` ${args.packet.task_id}` : ""}`,
+        agent: args.decision.agent,
+      })
+      if (args.onSessionCreated) {
+        await args.onSessionCreated({
+          sessionID,
+          taskMarkdown,
+        })
+      }
+      await adapter.continueNodeSession({
+        sessionID,
         agent: args.decision.agent,
         prompt: taskMarkdown,
       })

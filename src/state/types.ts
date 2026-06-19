@@ -104,6 +104,7 @@ export type WorkflowState = {
   project: string
   session: string
   parent_session_id: string
+  activation: "draft" | "active"
   workflow: WorkflowKind
   entrypoint: WorkflowEntrypoint
   limited_context: boolean

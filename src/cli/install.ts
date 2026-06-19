@@ -7,7 +7,14 @@ import { DEFAULT_CONFIG } from "../config/defaults"
 
 export const PACKAGE_NAME = "opencode-superpowers-controller"
 export const CONFIG_FILE_NAME = "opencode-superpowers.jsonc"
-const EXCLUDED_SKILL_DIRS = new Set(["superpowers-writing-skills"])
+const EXCLUDED_SKILL_DIRS = new Set([
+  "superpowers-executing-plans",
+  "superpowers-receiving-code-review",
+  "superpowers-subagent-driven-development",
+  "superpowers-using-git-worktrees",
+  "superpowers-using-superpowers",
+  "superpowers-writing-skills",
+])
 
 export function mergePluginEntry(content: string, pluginEntry = PACKAGE_NAME): string {
   const parsed = parse(content)

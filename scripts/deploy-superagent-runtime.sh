@@ -76,7 +76,7 @@ NODE
 
 sync_skills() {
   mkdir -p "$CONFIG_DIR/skills"
-  rsync -a --delete --exclude 'superpowers-writing-skills' "$REPO_ROOT/assets/skills/" "$CONFIG_DIR/skills/"
+  rsync -a --delete "$REPO_ROOT/assets/skills/" "$CONFIG_DIR/skills/"
 }
 
 write_launchers() {
@@ -97,48 +97,12 @@ set -euo pipefail
 ROOT="\${SUPERAGENT_ROOT:-$RUNTIME_ROOT}"
 PORT="\${SUPERAGENT_PORT:-$PORT}"
 HOSTNAME="\${SUPERAGENT_HOSTNAME:-$HOSTNAME}"
-PID_FILE="\$ROOT/superagent.pid"
-LOG_FILE="\$ROOT/superagent.log"
-PROJECT_DIR="\$ROOT/project"
+PROJECT_DIR="\${SUPERAGENT_PROJECT_DIR:-\$PWD}"
 export HOME="\$ROOT/home"
 export XDG_CONFIG_HOME="\$ROOT/home/.config"
-
-listener_pid() {
-  lsof -tiTCP:"\$PORT" -sTCP:LISTEN | head -n 1
-}
-
-ensure_web_server() {
-  mkdir -p "\$PROJECT_DIR" "\$(dirname "\$LOG_FILE")"
-  local listener
-  listener="\$(listener_pid || true)"
-  if [[ -n "\$listener" ]]; then
-    echo "\$listener" > "\$PID_FILE"
-    return 0
-  fi
-
-  (
-    cd "\$PROJECT_DIR"
-    nohup "$OPENCODE_BIN" web --hostname "\$HOSTNAME" --port "\$PORT" --print-logs --log-level INFO > "\$LOG_FILE" 2>&1 &
-    echo \$! > "\$PID_FILE"
-  )
-
-  for _ in {1..50}; do
-    listener="\$(listener_pid || true)"
-    if [[ -n "\$listener" ]]; then
-      echo "\$listener" > "\$PID_FILE"
-      return 0
-    fi
-    sleep 0.2
-  done
-
-  echo "Superagent failed to start. Log: \$LOG_FILE" >&2
-  tail -n 80 "\$LOG_FILE" >&2 || true
-  return 1
-}
-
 if [[ \$# -eq 0 ]]; then
-  ensure_web_server
-  exec "$OPENCODE_BIN" attach "http://\$HOSTNAME:\$PORT" --dir "\$PROJECT_DIR"
+  mkdir -p "\$PROJECT_DIR"
+  exec "$OPENCODE_BIN" "\$PROJECT_DIR" --agent "super-agent"
 fi
 exec "$OPENCODE_BIN" "\$@"
 SH

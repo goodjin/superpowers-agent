@@ -30,10 +30,10 @@ describe("OpenCode 工作流 e2e", () => {
       "路由一个 debug 任务，记录 root cause 产物，并验证持久化工作流状态。",
       async (log) => {
         log.step("创建隔离 OpenCode harness", "插件从 dist 加载，项目状态只写入临时目录")
-        harness = await createOpencodeE2EHarness()
+        harness = await createOpencodeE2EHarness({ enableChildPrompts: true })
         const requestId = "debug-root-cause"
 
-        log.step("注册 mock LLM 响应", "同一个 request_id 依次驱动 sp_route、sp_record 和最终文本响应")
+        log.step("注册 mock LLM 响应", "同一个 request_id 依次驱动 sp_route、sp_record、implement 子会话和最终文本响应")
         await harness.mock.expect([
           {
             request_id: requestId,
@@ -70,6 +70,13 @@ describe("OpenCode 工作流 e2e", () => {
             },
           },
           {
+            request_id: "node-001-implement",
+            response: {
+              type: "text",
+              content: "implementation session acknowledged",
+            },
+          },
+          {
             request_id: requestId,
             response: {
               type: "text",
@@ -81,6 +88,7 @@ describe("OpenCode 工作流 e2e", () => {
         log.step("运行 opencode", "提示词标记将 trace_id 和 request_id 绑定到 mock 响应队列")
         const result = await harness.runOpencode({
           title: "Debug root cause",
+          timeoutMs: 60_000,
           message: `[e2e_trace_id:debug-root-cause] [llm_request_id:${requestId}] /sp-debug 修复失败测试`,
         })
 
@@ -88,11 +96,17 @@ describe("OpenCode 工作流 e2e", () => {
         expect(result.error).toBeUndefined()
         log.verify("OpenCode 已完成 debug tool-call 循环并成功退出")
 
-        log.step("验证 mock 模型请求", "四次模型调用应该按 FIFO 消费同一个 request_id 队列")
+        log.step("验证 mock 模型请求", "主请求应触发 route、start、record，再派生一个 implement 子会话")
         const requests = await readLoggedMockRequests(log, harness)
-        expect(requests.map((request) => request.request_id)).toEqual(Array(4).fill(requestId))
+        expect(requests.map((request) => request.request_id)).toEqual([
+          requestId,
+          requestId,
+          requestId,
+          "node-001-implement",
+          requestId,
+        ])
         expect(await harness.mock.pending()).toEqual([])
-        log.verify("mock LLM 已消费全部 debug 预设响应，且没有剩余响应")
+        log.verify("mock LLM 已消费 debug 主链路和 implement 子会话的全部预设响应")
 
         log.step("验证工作流状态和产物", "debug 模式应该持久化 root_cause_found 和 root_cause.md")
         const state = readLoggedWorkflowState(log, harness, "debug 响应处理完成后")
@@ -669,6 +683,264 @@ describe("OpenCode 工作流 e2e", () => {
       },
     )
   }, 70_000)
+
+  test("super-agent 严格走 prepare-review-start 和完整执行链路", async () => {
+    await e2eLog.scenario(
+      "prepare 到 start 的完整链路",
+      "super-agent 先路由和确认，再 prepare 生成正式计划，审查通过后调用 sp_start(run_id)，随后由插件驱动实现、评审、验证和结束节点。",
+      async (log) => {
+        log.step("创建启用子节点 prompt 的 harness", "需要记录 planner 和后续节点的真实任务 prompt")
+        harness = await createOpencodeE2EHarness({ enableChildPrompts: true } as never)
+        const routeRequestId = "feature-prepare-route"
+
+        log.step("第一轮只做路由和确认提示", "super-agent 应先给出 proposal，而不是直接进入实现")
+        await harness.mock.expect([
+          toolCall(routeRequestId, "sp_route", {
+            request: "给任务运行面板增加按状态筛选和批量重试确认流程",
+          }),
+          textResponse(routeRequestId, "I routed this to the feature workflow and need confirmation before prepare."),
+        ])
+
+        const routeResult = await harness.runOpencode({
+          agent: "super-agent",
+          title: "Feature route",
+          message:
+            "[e2e_trace_id:feature-prepare-route] [llm_request_id:feature-prepare-route] 给任务运行面板增加按状态筛选和批量重试确认流程",
+        })
+
+        expect(routeResult.code).toBe(0)
+        expect(harness.readWorkflowState()).toBeNull()
+        const routeRequests = await readLoggedMockRequests(log, harness)
+        expect(routeRequests.map((request) => request.request_id)).toEqual([routeRequestId, routeRequestId])
+        expect(await harness.mock.pending()).toEqual([])
+        log.verify("首轮只产生 route proposal，没有提前创建 workflow run")
+
+        log.step("第二轮确认 prepare，并让 planner 产出正式计划", "prepare 应创建 draft run，planner 应写入 plan 与 task graph")
+        await harness.mock.reset()
+        const prepareRequestId = "feature-prepare-confirmed"
+        await harness.mock.expect([
+          toolCall(prepareRequestId, "sp_prepare", {
+            request: "给任务运行面板增加按状态筛选和批量重试确认流程",
+            workflow: "feature",
+            entrypoint: "feature",
+            proposal: [
+              "# Superpowers Workflow Proposal",
+              "",
+              "Request: 给任务运行面板增加按状态筛选和批量重试确认流程",
+              "",
+              "I will run the feature workflow.",
+              "",
+              "Entrypoint: feature",
+              "",
+              "Next action: confirm to prepare the planning run.",
+            ].join("\n"),
+          }),
+          toolCall("node-001-plan", "sp_record", {
+            event: "plan",
+            status: "passed",
+            summary: "The planner produced a concrete implementation plan and a single executable task.",
+            gates: {
+              plan_written: true,
+            },
+            artifacts: {
+              plan: [
+                "# Implementation Plan",
+                "1. Add a status filter for queued, running, failed, and completed runs.",
+                "2. Add a bulk retry confirmation dialog with selected-count context.",
+                "3. Cover the filter and confirmation flow with regression tests.",
+              ].join("\n"),
+            },
+            task_graph: {
+              tasks: [
+                {
+                  id: "T1",
+                  title: "Task run filter and retry confirmation",
+                  summary: "Implement the filter model, confirmation interaction, and regression coverage.",
+                  depends_on: [],
+                  files: ["src/task-run-panel.tsx", "test/task-run-panel.test.tsx"],
+                  test_commands: ["bun test test/task-run-panel.test.tsx"],
+                },
+              ],
+            },
+          }),
+          textResponse("node-001-plan", "planner recorded the plan"),
+          textResponse(prepareRequestId, "The plan draft is ready for review. Confirm before calling sp_start."),
+        ])
+
+        const prepareResult = await harness.runOpencode({
+          agent: "super-agent",
+          title: "Feature prepare",
+          timeoutMs: 60_000,
+          message:
+            "[e2e_trace_id:feature-prepare-confirmed] [llm_request_id:feature-prepare-confirmed] 已确认需求，请先准备正式计划。",
+        })
+
+        const prepareRequests = await readLoggedMockRequests(log, harness)
+        expect(prepareResult.code).toBe(0)
+        const preparedState = readLoggedWorkflowState(log, harness, "prepare 完成后")
+        expect(preparedState?.activation).toBe("draft")
+        expect(preparedState?.current_phase).toBe("awaiting-plan-approval")
+        expect(preparedState?.pending_question?.options).toEqual(["start", "revise"])
+        logArtifactSnapshots(log, harness, ["plan"])
+
+        expect(prepareRequests.map((request) => request.request_id)).toEqual([
+          prepareRequestId,
+          "node-001-plan",
+          "node-001-plan",
+          prepareRequestId,
+        ])
+        expect(await harness.mock.pending()).toEqual([])
+
+        const preparedRunID = preparedState?.id
+        expect(preparedRunID).toBeTruthy()
+        const prepareNodeHarness = withNodeAccess(harness)
+        expect(prepareNodeHarness.listNodeIDs()).toEqual(["001-plan"])
+        expect(prepareNodeHarness.readNodeTask("001-plan")).toContain(
+          "Produce the formal implementation plan and task graph for controller review.",
+        )
+        expect(prepareNodeHarness.readNodeTask("001-plan")).toContain("[llm_request_id:node-001-plan]")
+        expect(prepareNodeHarness.readNodeRecord("001-plan")).toMatchObject({
+          event: "plan",
+          status: "passed",
+        })
+        log.verify("draft plan 已落盘，planner 节点 prompt 和 record 都可检查")
+
+        log.step("第三轮确认 start，并由插件接管执行链路", "sp_start(run_id) 后应依次完成 implement、spec-review、code-review、verification、finish")
+        await harness.mock.reset()
+        const startRequestId = "feature-start-approved"
+        await harness.mock.expect([
+          toolCall(startRequestId, "sp_start", {
+            run_id: preparedRunID,
+          }),
+          toolCall("node-002-implement-T1", "sp_record", {
+            event: "implementation",
+            status: "passed",
+            summary: "The task run panel now filters by status and requires confirmation before bulk retry.",
+            gates: {
+              implementation_done: true,
+            },
+            artifacts: {
+              patch_summary: [
+                "- Added a status filter model for queued, running, failed, and completed task runs.",
+                "- Added a bulk retry confirmation dialog that shows the selected run count before submission.",
+                "- Added regression coverage for filter persistence and the retry confirmation path.",
+              ].join("\n"),
+            },
+          }),
+          textResponse("node-002-implement-T1", "implementation recorded"),
+          toolCall("node-003-spec-review", "sp_record", {
+            event: "spec-review",
+            status: "passed",
+            summary: "The implementation satisfies the requested status filter and retry confirmation behavior.",
+            gates: {
+              spec_review_passed: true,
+            },
+            artifacts: {
+              spec_review: "Reviewed the task panel behavior against the request and plan; no spec gaps remain.",
+            },
+          }),
+          textResponse("node-003-spec-review", "spec review recorded"),
+          toolCall("node-004-code-review", "sp_record", {
+            event: "code-review",
+            status: "passed",
+            summary: "No blocking code quality issues remain in the filter state or retry confirmation flow.",
+            gates: {
+              code_review_passed: true,
+            },
+            artifacts: {
+              code_review: "Checked state transitions, dialog confirmation behavior, and regression coverage. No blockers.",
+            },
+          }),
+          textResponse("node-004-code-review", "code review recorded"),
+          toolCall("node-005-verification", "sp_record", {
+            event: "verification",
+            status: "passed",
+            summary: "Fresh verification passed after the final implementation change.",
+            gates: {
+              verification_fresh: true,
+            },
+            artifacts: {
+              verification_log: "bun test test/task-run-panel.test.tsx && bun run test:e2e:opencode passed.",
+            },
+          }),
+          textResponse("node-005-verification", "verification recorded"),
+          toolCall("node-006-finish", "sp_record", {
+            event: "finish",
+            status: "passed",
+            summary: "The workflow is ready for delivery after fresh verification.",
+            artifacts: {
+              finish_note: "Ready to deliver the task panel filter and bulk retry confirmation flow.",
+            },
+          }),
+          textResponse("node-006-finish", "finish recorded"),
+          textResponse(startRequestId, "Execution has started and the workflow completed cleanly."),
+        ])
+
+        const startResult = await harness.runOpencode({
+          agent: "super-agent",
+          title: "Feature start",
+          timeoutMs: 90_000,
+          message:
+            "[e2e_trace_id:feature-start-approved] [llm_request_id:feature-start-approved] 计划确认无误，现在开始执行。",
+        })
+
+        const startRequests = await readLoggedMockRequests(log, harness)
+        expect(startResult.code).toBe(0)
+        expect(startRequests.map((request) => request.request_id)).toEqual([
+          startRequestId,
+          "node-002-implement-T1",
+          "node-003-spec-review",
+          "node-004-code-review",
+          "node-005-verification",
+          "node-006-finish",
+          "node-006-finish",
+          "node-005-verification",
+          "node-004-code-review",
+          "node-003-spec-review",
+          "node-002-implement-T1",
+          startRequestId,
+        ])
+        expect(await harness.mock.pending()).toEqual([])
+
+        const finishedState = readLoggedWorkflowState(log, harness, "完整链路完成后")
+        expect(finishedState?.activation).toBe("active")
+        expect(finishedState?.phase).toBe("finished")
+        expect(finishedState?.status).toBe("passed")
+        expect(finishedState?.history.map((entry) => entry.event)).toEqual([
+          "created",
+          "plan",
+          "implementation",
+          "spec-review",
+          "code-review",
+          "verification",
+          "finish",
+        ])
+        logArtifactSnapshots(log, harness, ["plan", "patch_summary", "spec_review", "code_review", "verification_log"])
+        expect(harness.readArtifact("verification_log")).toContain("bun run test:e2e:opencode passed")
+
+        const startedNodeHarness = withNodeAccess(harness)
+        expect(startedNodeHarness.listNodeIDs()).toEqual([
+          "001-plan",
+          "002-implement-T1",
+          "003-spec-review",
+          "004-code-review",
+          "005-verification",
+          "006-finish",
+        ])
+        expect(startedNodeHarness.readNodeTask("002-implement-T1")).toContain("Execute task T1.")
+        expect(startedNodeHarness.readNodeTask("002-implement-T1")).toContain("Primary skill: superpowers-test-driven-development")
+        expect(startedNodeHarness.readNodeRecord("002-implement-T1")).toMatchObject({
+          event: "implementation",
+          status: "passed",
+        })
+        expect(startedNodeHarness.readNodeRecord("005-verification")).toMatchObject({
+          event: "verification",
+          status: "passed",
+        })
+        log.verify("super-agent 只负责管控，prepare-review-start 之后由插件按预期节点链路完成执行")
+      },
+    )
+  }, 120_000)
 })
 
 function toolCall(requestId: string, name: string, args: Record<string, unknown>): MockLlmExpectation {
@@ -733,5 +1005,19 @@ function logArtifactSnapshots(log: E2EScenarioLogger, harness: OpencodeE2EHarnes
 function logLastArtifactSnapshots(log: E2EScenarioLogger, harness: OpencodeE2EHarness, names: string[]): void {
   for (const name of names) {
     log.artifactSnapshot(name, harness.readLastArtifact(name))
+  }
+}
+
+function withNodeAccess(
+  value: unknown,
+): {
+  listNodeIDs(runID?: string): string[]
+  readNodeTask(nodeID: string, runID?: string): string | null
+  readNodeRecord(nodeID: string, runID?: string): Record<string, unknown> | null
+} {
+  return value as {
+    listNodeIDs(runID?: string): string[]
+    readNodeTask(nodeID: string, runID?: string): string | null
+    readNodeRecord(nodeID: string, runID?: string): Record<string, unknown> | null
   }
 }

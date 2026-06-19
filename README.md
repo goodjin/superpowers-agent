@@ -86,21 +86,16 @@ Command -> super-agent -> Node Session -> Node Agent -> Primary Skill
 | `sp-verifier` | verification 节点 |
 | `sp-finisher` | finish / branch completion |
 
-同时打包 13 个 `superpowers-*` skills：
+运行时只打包节点 agent 直接使用的 8 个 primary skills：
 
 - `superpowers-brainstorming`
 - `superpowers-writing-plans`
 - `superpowers-systematic-debugging`
 - `superpowers-test-driven-development`
 - `superpowers-dispatching-parallel-agents`
-- `superpowers-subagent-driven-development`
-- `superpowers-executing-plans`
 - `superpowers-requesting-code-review`
-- `superpowers-receiving-code-review`
 - `superpowers-verification-before-completion`
 - `superpowers-finishing-a-development-branch`
-- `superpowers-using-git-worktrees`
-- `superpowers-using-superpowers`
 
 这两组没有互相替代。Agent 是角色，skill 是做事方法。
 

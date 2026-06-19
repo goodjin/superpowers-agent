@@ -104,10 +104,11 @@ export function extractRequestId(input: RequestIdInput): string | null {
 export async function createMockLlmServer(): Promise<MockLlmServer> {
   const expectations: MockLlmExpectation[] = []
   const requests: RecordedMockLlmRequest[] = []
+  const port = await reserveLoopbackPort()
 
   const server = Bun.serve({
     hostname: "127.0.0.1",
-    port: 0,
+    port,
     async fetch(request) {
       const url = new URL(request.url)
 
@@ -209,6 +210,29 @@ export async function createMockLlmServer(): Promise<MockLlmServer> {
       await server.stop()
     },
   }
+}
+
+async function reserveLoopbackPort(): Promise<number> {
+  return new Promise((resolve, reject) => {
+    const server = createServer()
+    server.unref()
+    server.on("error", reject)
+    server.listen(0, "127.0.0.1", () => {
+      const address = server.address()
+      const port = typeof address === "object" && address ? address.port : 0
+      server.close((error) => {
+        if (error) {
+          reject(error)
+          return
+        }
+        if (!port) {
+          reject(new Error("Failed to reserve a loopback port for the mock LLM server."))
+          return
+        }
+        resolve(port)
+      })
+    })
+  })
 }
 
 function toRecordedResponse(response: MockLlmResponse, stream: boolean): RecordedMockLlmResponse {
@@ -401,3 +425,4 @@ function isTextPart(value: unknown): value is { type: "text"; text: string } {
     typeof value.text === "string"
   )
 }
+import { createServer } from "node:net"

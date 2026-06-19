@@ -34,6 +34,7 @@ state 模块负责 workflow run 的本地持久化、artifact 写入、task grap
 
 `WorkflowState` 保留旧 e2e 读取的 `mode`、`phase`、`session` 字段，同时新增 control-plane 字段：
 
+- `activation`
 - `workflow`
 - `entrypoint`
 - `limited_context`
@@ -42,6 +43,11 @@ state 模块负责 workflow run 的本地持久化、artifact 写入、task grap
 - `status`
 - `node_runs`
 - `pending_question`
+
+其中 `activation` 用来区分：
+
+- `draft`：planning run 已准备，但还没得到最终执行确认
+- `active`：已正式进入 workflow 执行链路
 
 ## Node Runs
 

@@ -8,6 +8,7 @@ import type { NodeRun, WorkflowEntrypoint, WorkflowKind, WorkflowMode, WorkflowR
 export type ProjectStore = {
   root: string
   readCurrent(): WorkflowState | null
+  readRun(runID: string): WorkflowState | null
   start(args: { session: string; mode: WorkflowMode; goal: string }): WorkflowState
   startRun(args: {
     workflow: WorkflowKind
@@ -15,6 +16,18 @@ export type ProjectStore = {
     goal: string
     request: string
     proposal: string
+    parentSessionID: string
+  }): WorkflowState
+  prepareRun(args: {
+    workflow: WorkflowKind
+    entrypoint: WorkflowEntrypoint
+    goal: string
+    request: string
+    proposal: string
+    parentSessionID: string
+  }): WorkflowState
+  activateRun(args: {
+    runID: string
     parentSessionID: string
   }): WorkflowState
   record(record: WorkflowRecord): WorkflowState
@@ -38,7 +51,10 @@ export function createProjectStore(project: string): ProjectStore {
       const currentPath = join(root, "current.json")
       if (!existsSync(currentPath)) return null
       const pointer = JSON.parse(readFileSync(currentPath, "utf8")) as { run: string }
-      const statePath = join(root, "runs", pointer.run, "state.json")
+      return this.readRun(pointer.run)
+    },
+    readRun(runID) {
+      const statePath = join(root, "runs", runID, "state.json")
       if (!existsSync(statePath)) return null
       return JSON.parse(readFileSync(statePath, "utf8")) as WorkflowState
     },
@@ -64,16 +80,54 @@ export function createProjectStore(project: string): ProjectStore {
         entrypoint: args.entrypoint,
         goal: args.goal,
         parentSessionID: args.parentSessionID,
+        activation: "active",
       })
-      const runRoot = join(root, "runs", state.id)
-      mkdirSync(join(runRoot, "artifacts"), { recursive: true })
-      mkdirSync(join(runRoot, "nodes"), { recursive: true })
+      initializeRunRoot(runRootFor(root, state.id))
       writeState(root, state)
       writeCurrent(root, state.id)
       writeRunMarkdown(root, state.id, "request.md", args.request)
       writeRunMarkdown(root, state.id, "proposal.md", args.proposal)
       appendChangelog(root, state.id, `created ${args.workflow} workflow from ${args.entrypoint}`)
       return state
+    },
+    prepareRun(args) {
+      const state = createWorkflowState({
+        id: randomUUID(),
+        project,
+        workflow: args.workflow,
+        entrypoint: args.entrypoint,
+        goal: args.goal,
+        parentSessionID: args.parentSessionID,
+        activation: "draft",
+      })
+      initializeRunRoot(runRootFor(root, state.id))
+      writeState(root, state)
+      writeCurrent(root, state.id)
+      writeRunMarkdown(root, state.id, "request.md", args.request)
+      writeRunMarkdown(root, state.id, "proposal.md", args.proposal)
+      appendChangelog(root, state.id, `prepared ${args.workflow} workflow from ${args.entrypoint}`)
+      return state
+    },
+    activateRun(args) {
+      const current = this.readRun(args.runID)
+      if (!current) {
+        throw new Error(`No Superpowers workflow found for run ${args.runID}.`)
+      }
+      const next: WorkflowState = {
+        ...current,
+        activation: "active",
+        session: args.parentSessionID,
+        parent_session_id: args.parentSessionID,
+        phase: current.phase === "awaiting-plan-approval" ? "plan-complete" : current.phase,
+        current_phase: current.current_phase === "awaiting-plan-approval" ? "plan-complete" : current.current_phase,
+        status: current.status === "waiting_user" ? "running" : current.status,
+        pending_question: undefined,
+        updated_at: new Date().toISOString(),
+      }
+      writeState(root, next)
+      writeCurrent(root, next.id)
+      appendChangelog(root, next.id, `activated ${next.workflow} workflow from ${next.entrypoint}`)
+      return next
     },
     record(record) {
       const current = this.readCurrent()
@@ -107,13 +161,16 @@ export function createProjectStore(project: string): ProjectStore {
       }
       const next = applyRecord(current, args.input)
       const nodeRuns = completeNodeRuns(next.node_runs, nodeID, args.input)
+      const pendingQuestion = buildPendingQuestion({
+        current,
+        next,
+        nodeID,
+        input: args.input,
+      })
       const withNodes = {
         ...next,
         node_runs: nodeRuns,
-        pending_question:
-          args.input.status === "needs_user" && args.input.question
-            ? { ...args.input.question, source_node_id: nodeID }
-            : next.pending_question,
+        pending_question: pendingQuestion,
       }
       writeState(root, withNodes)
       writeCurrent(root, withNodes.id)
@@ -164,6 +221,7 @@ function createWorkflowState(args: {
   entrypoint: WorkflowEntrypoint
   goal: string
   parentSessionID: string
+  activation: WorkflowState["activation"]
 }): WorkflowState {
   const now = new Date().toISOString()
   const mode = modeForWorkflow(args.workflow, args.entrypoint)
@@ -172,13 +230,14 @@ function createWorkflowState(args: {
     project: args.project,
     session: args.parentSessionID,
     parent_session_id: args.parentSessionID,
+    activation: args.activation,
     workflow: args.workflow,
     entrypoint: args.entrypoint,
     limited_context: args.entrypoint !== args.workflow,
     mode,
-    phase: "intake",
-    current_phase: "intake",
-    status: "intake",
+    phase: args.activation === "draft" ? "plan" : "intake",
+    current_phase: args.activation === "draft" ? "plan" : "intake",
+    status: args.activation === "draft" ? "running" : "intake",
     goal: args.goal,
     created_at: now,
     updated_at: now,
@@ -187,6 +246,15 @@ function createWorkflowState(args: {
     node_runs: [],
     history: [{ at: now, event: "created", to: args.workflow }],
   }
+}
+
+function initializeRunRoot(runRoot: string): void {
+  mkdirSync(join(runRoot, "artifacts"), { recursive: true })
+  mkdirSync(join(runRoot, "nodes"), { recursive: true })
+}
+
+function runRootFor(root: string, runID: string): string {
+  return join(root, "runs", runID)
 }
 
 function modeForWorkflow(workflow: WorkflowKind, entrypoint?: WorkflowEntrypoint): WorkflowMode {
@@ -292,4 +360,26 @@ function completeNodeRuns(nodeRuns: NodeRun[], nodeID: string, record: WorkflowR
       record_path: `nodes/${nodeID}/record.json`,
     }
   })
+}
+
+function buildPendingQuestion(args: {
+  current: WorkflowState
+  next: WorkflowState
+  nodeID: string
+  input: WorkflowRecord
+}): WorkflowState["pending_question"] {
+  if (args.input.status === "needs_user" && args.input.question) {
+    return {
+      ...args.input.question,
+      source_node_id: args.nodeID,
+    }
+  }
+  if (args.current.activation === "draft" && args.input.event === "plan" && args.input.status === "passed") {
+    return {
+      prompt: "Plan and task graph are ready. Review the artifacts, decide whether changes are needed, and confirm before calling sp_start.",
+      options: ["start", "revise"],
+      source_node_id: args.nodeID,
+    }
+  }
+  return args.next.pending_question
 }

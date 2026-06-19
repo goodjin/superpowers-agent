@@ -27,8 +27,8 @@ The archive contains 14 official skill directories:
 - `writing-plans`
 - `writing-skills`
 
-## Relationship To Bundled Runtime Skills
+## Relationship To Runtime Skills
 
-The source bundle under `assets/skills/` currently contains 14 `superpowers-*` skill directories. The default installer excludes `superpowers-writing-skills`, so the installed runtime set is 13 skills.
+The runtime bundle under `assets/skills/` contains only the primary skills directly assigned by `src/router/modes.ts`. Support skills such as `using-superpowers`, `executing-plans`, `subagent-driven-development`, `receiving-code-review`, `using-git-worktrees`, and `writing-skills` stay in this archive for source review instead of being installed by default.
 
 This archive is for source review, comparison, and documentation. Updating files here does not change runtime behavior unless the corresponding files under `assets/skills/` and related router/install logic are updated separately.

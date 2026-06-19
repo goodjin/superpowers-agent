@@ -24,7 +24,7 @@ The deployment module maintains the local isolated Superagent runtime used to te
   superagent.log
 ```
 
-`superagent` sets `HOME` and `XDG_CONFIG_HOME` to the isolated runtime before calling the bundled OpenCode 1.16.2 binary. With no arguments it ensures OpenCode Web is running on port `5096`, then opens a TUI attached to that Web server. With arguments it forwards them to OpenCode, so `superagent agent list` and `superagent models minimaxi-ultra` work as normal CLI commands.
+`superagent` sets `HOME` and `XDG_CONFIG_HOME` to the isolated runtime before calling the bundled OpenCode 1.16.2 binary. With no arguments it opens the caller's current working directory in the OpenCode TUI with `super-agent` selected. Set `SUPERAGENT_PROJECT_DIR` to override that default directory. With arguments it forwards them to OpenCode, so `superagent web`, `superagent agent list`, and `superagent models minimaxi-ultra` work as normal CLI commands.
 
 ## Update Flow
 
@@ -38,11 +38,11 @@ The script rebuilds the server plugin entry at `dist/index.js` and the TUI plugi
 
 The isolated `opencode.json` plugin list includes `file://.../dist/index.js` for server hooks. The isolated `tui.json` plugin list includes `file://.../dist/tui.js` for TUI routes.
 
-The generated isolated `opencode.json` sets global OpenCode permissions to `allow`. Agent-level permissions from the plugin still come from `src/agents/index.ts`.
+The generated isolated `opencode.json` sets global OpenCode permissions to `allow`. Plugin-generated agents inherit that global allow mode through `src/agents/index.ts`, while non-allow global configurations keep the plugin's default role-specific restrictions.
 
 ## Notes
 
 - The default user config at `~/.config/opencode` is not modified.
 - The Web server defaults to `http://127.0.0.1:5096`.
 - Override the port with `SUPERAGENT_PORT=<port>`.
-- `scripts/deploy-superagent-runtime.sh start` and `restart` manage only the background headless server. Run `superagent` with no arguments to open the attached TUI.
+- `scripts/deploy-superagent-runtime.sh start` and `restart` manage only the background headless server. Run `superagent` with no arguments to open the default TUI. Run `superagent web` when the Web UI should be launched from the launcher.

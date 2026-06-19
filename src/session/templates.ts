@@ -5,6 +5,7 @@ import type { NodeTaskPacket } from "./task-packet"
 export function buildNodeTaskPrompt(packet: NodeTaskPacket): string {
   const artifacts = packet.required_artifacts.map((artifact) => `- ${artifact.name}: ${artifact.path}`).join("\n")
   return [
+    maybeChildRequestMarker(packet.node_id),
     `# Superpowers Node Task: ${packet.node_id}`,
     "",
     `Workflow: ${packet.workflow}`,
@@ -33,6 +34,10 @@ export function buildNodeTaskPrompt(packet: NodeTaskPacket): string {
     .join("\n")
 }
 
+export function buildChildRequestId(nodeID: string): string {
+  return `node-${nodeID}`
+}
+
 export function buildNodeTaskPacket(args: {
   state: WorkflowState
   decision: Extract<DispatchDecision, { action: "create_session" | "reuse_session" }>
@@ -47,20 +52,29 @@ export function buildNodeTaskPacket(args: {
     agent: args.decision.agent,
     primary_skill: args.decision.primary_skill,
     task_id: args.decision.task_id,
-    objective: objectiveForDecision(args.decision),
-    required_artifacts: requiredArtifactsForPhase(args.decision.phase),
+    objective: objectiveForDecision(args.state, args.decision),
+    required_artifacts: requiredArtifactsForPhase(args.decision.phase, args.state),
     record_contract: contract,
   }
 }
 
-function objectiveForDecision(decision: Extract<DispatchDecision, { action: "create_session" | "reuse_session" }>): string {
+function objectiveForDecision(
+  state: WorkflowState,
+  decision: Extract<DispatchDecision, { action: "create_session" | "reuse_session" }>,
+): string {
+  if (state.activation === "draft" && decision.phase === "plan") {
+    return "Produce the formal implementation plan and task graph for controller review. Do not begin implementation."
+  }
   if (decision.task_id) return `${decision.reason}. Execute task ${decision.task_id}.`
   return decision.reason
 }
 
-function requiredArtifactsForPhase(phase: string): NodeTaskPacket["required_artifacts"] {
+function requiredArtifactsForPhase(phase: string, state: WorkflowState): NodeTaskPacket["required_artifacts"] {
   switch (phase) {
     case "plan":
+      if (state.activation === "draft") {
+        return [{ name: "request", path: "request.md" }]
+      }
       return [{ name: "spec", path: "artifacts/spec.md" }]
     case "implement":
       return [{ name: "plan", path: "artifacts/plan.md" }]
@@ -96,4 +110,9 @@ function recordContractForPhase(phase: string): NodeTaskPacket["record_contract"
     default:
       return { event: "question", expected_artifacts: [], allowed_gates: [] }
   }
+}
+
+function maybeChildRequestMarker(nodeID: string): string {
+  if (process.env.OPENCODE_SUPERPOWERS_E2E_CHILD_REQUEST_MARKERS !== "1") return ""
+  return `[llm_request_id:${buildChildRequestId(nodeID)}]`
 }

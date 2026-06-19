@@ -37,6 +37,9 @@ export type OpencodeE2EHarness = {
   readLastWorkflowState(): WorkflowState | null
   readArtifact(name: string): string | null
   readLastArtifact(name: string): string | null
+  listNodeIDs(runID?: string): string[]
+  readNodeTask(nodeID: string, runID?: string): string | null
+  readNodeRecord(nodeID: string, runID?: string): Record<string, unknown> | null
   close(): Promise<void>
 }
 
@@ -44,6 +47,7 @@ type HarnessOptions = {
   projectRoot?: string
   config?: Record<string, unknown>
   workflowConfig?: Record<string, unknown>
+  enableChildPrompts?: boolean
 }
 
 const DEFAULT_TIMEOUT_MS = 30_000
@@ -103,7 +107,7 @@ export async function createOpencodeE2EHarness(options: HarnessOptions = {}): Pr
         ...(args.extraArgs ?? []),
         args.message,
       ]
-      return runCommand(opencodeBin, commandArgs, projectDir, isolatedEnv(homeDir), args.timeoutMs ?? DEFAULT_TIMEOUT_MS)
+      return runCommand(opencodeBin, commandArgs, projectDir, isolatedEnv(homeDir, options), args.timeoutMs ?? DEFAULT_TIMEOUT_MS)
     },
     readWorkflowState() {
       return readWorkflowState(projectDir)
@@ -124,6 +128,27 @@ export async function createOpencodeE2EHarness(options: HarnessOptions = {}): Pr
       const artifactPath = join(projectDir, ".opencode", "superpowers", "runs", state.id, "artifacts", `${name}.md`)
       if (!existsSync(artifactPath)) return null
       return readFileSync(artifactPath, "utf8")
+    },
+    listNodeIDs(runID) {
+      const state = readHarnessRun(projectDir, runID)
+      if (!state) return []
+      const nodesRoot = join(projectDir, ".opencode", "superpowers", "runs", state.id, "nodes")
+      if (!existsSync(nodesRoot)) return []
+      return readdirSync(nodesRoot).sort()
+    },
+    readNodeTask(nodeID, runID) {
+      const state = readHarnessRun(projectDir, runID)
+      if (!state) return null
+      const taskPath = join(projectDir, ".opencode", "superpowers", "runs", state.id, "nodes", nodeID, "task.md")
+      if (!existsSync(taskPath)) return null
+      return readFileSync(taskPath, "utf8")
+    },
+    readNodeRecord(nodeID, runID) {
+      const state = readHarnessRun(projectDir, runID)
+      if (!state) return null
+      const recordPath = join(projectDir, ".opencode", "superpowers", "runs", state.id, "nodes", nodeID, "record.json")
+      if (!existsSync(recordPath)) return null
+      return JSON.parse(readFileSync(recordPath, "utf8")) as Record<string, unknown>
     },
     async close() {
       await mockServer.close()
@@ -150,9 +175,7 @@ function readWorkflowState(projectDir: string): WorkflowState | null {
   const currentPath = join(projectDir, ".opencode", "superpowers", "current.json")
   if (!existsSync(currentPath)) return null
   const pointer = JSON.parse(readFileSync(currentPath, "utf8")) as { run: string }
-  const statePath = join(projectDir, ".opencode", "superpowers", "runs", pointer.run, "state.json")
-  if (!existsSync(statePath)) return null
-  return JSON.parse(readFileSync(statePath, "utf8")) as WorkflowState
+  return readRun(projectDir, pointer.run)
 }
 
 function writeWorkflowConfig(projectDir: string, config: Record<string, unknown> | undefined): void {
@@ -200,13 +223,26 @@ function writeOpencodeConfig(args: {
   )
 }
 
-function isolatedEnv(home: string): NodeJS.ProcessEnv {
+function readHarnessRun(projectDir: string, runID?: string): WorkflowState | null {
+  if (runID) return readRun(projectDir, runID)
+  return readWorkflowState(projectDir) ?? readLastWorkflowState(projectDir)
+}
+
+function readRun(projectDir: string, runID: string): WorkflowState | null {
+  const statePath = join(projectDir, ".opencode", "superpowers", "runs", runID, "state.json")
+  if (!existsSync(statePath)) return null
+  return JSON.parse(readFileSync(statePath, "utf8")) as WorkflowState
+}
+
+function isolatedEnv(home: string, options: HarnessOptions): NodeJS.ProcessEnv {
+  const enableChildPrompts = options.enableChildPrompts === true
   return {
     ...process.env,
     HOME: home,
     XDG_CONFIG_HOME: join(home, ".config"),
     OPENCODE_DISABLE_UPDATE_CHECK: "1",
-    OPENCODE_SUPERPOWERS_DISABLE_CHILD_PROMPT: "1",
+    OPENCODE_SUPERPOWERS_DISABLE_CHILD_PROMPT: enableChildPrompts ? "0" : "1",
+    OPENCODE_SUPERPOWERS_E2E_CHILD_REQUEST_MARKERS: enableChildPrompts ? "1" : "0",
     NO_COLOR: "1",
   }
 }

@@ -79,21 +79,16 @@ The plugin dynamically injects these agents:
 | `sp-verifier` | fresh verification node |
 | `sp-finisher` | finish / branch completion node |
 
-It bundles 13 `superpowers-*` skills:
+The runtime bundle includes only the 8 primary skills directly assigned to node agents:
 
 - `superpowers-brainstorming`
 - `superpowers-writing-plans`
 - `superpowers-systematic-debugging`
 - `superpowers-test-driven-development`
 - `superpowers-dispatching-parallel-agents`
-- `superpowers-subagent-driven-development`
-- `superpowers-executing-plans`
 - `superpowers-requesting-code-review`
-- `superpowers-receiving-code-review`
 - `superpowers-verification-before-completion`
 - `superpowers-finishing-a-development-branch`
-- `superpowers-using-git-worktrees`
-- `superpowers-using-superpowers`
 
 Agents and skills are separate layers. An agent is a role. A skill is the method used by that role.
 

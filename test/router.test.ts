@@ -7,6 +7,7 @@ const baseState: WorkflowState = {
   project: "/repo",
   session: "session-1",
   parent_session_id: "session-1",
+  activation: "active",
   workflow: "feature",
   entrypoint: "feature",
   limited_context: false,

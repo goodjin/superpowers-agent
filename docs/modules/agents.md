@@ -41,8 +41,20 @@ agents 模块负责注入 Superpowers Controller 的 OpenCode agent 配置。`su
 
 - `super-agent` 不加载业务技能，也不执行节点工作。
 - `super-agent` 禁用 `tools.skill`，避免全局 skill 进入控制器上下文。
+- 对 planning-driven workflow，`super-agent` 负责 `sp_route -> sp_prepare -> plan review -> user confirm -> sp_start` 这一段控制链。
 - 节点 agent 保留 `skill` tool，但 `permission.skill` 只允许 router 分配的 primary skill，并拒绝其它全局 skill。
 - 节点 agent prompt 只声明一个 primary skill；需要其他 skill 时，由控制器创建或复用另一个节点 session。
+
+## Permission Inheritance
+
+`src/plugin.ts` resolves the host OpenCode `permission` value and passes it into `createAgentConfig`. If the config hook input omits `permission`, `src/config/permissions.ts` reads the active OpenCode config from `XDG_CONFIG_HOME` or `HOME`.
+
+When global `permission` is not `"allow"`, agents keep the default workflow boundaries:
+
+- `super-agent` cannot edit files directly, asks before bash, can dispatch only `sp-*` tasks, and has `tools.skill` disabled.
+- Node agents ask or deny edits according to their role, ask before bash, deny nested tasks, and can load only their primary skill.
+
+When global `permission` is `"allow"`, plugin agents inherit that posture by emitting explicit allow rules for read, edit, bash, task, skill, external directory, question, plan, and related OpenCode permission points. In this mode `super-agent` also stops setting `tools.skill = false`, so the plugin does not reintroduce permission prompts or hidden tool restrictions after the runtime has been configured as allow-all.
 
 ## Notes
 

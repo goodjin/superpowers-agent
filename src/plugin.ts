@@ -3,6 +3,7 @@ import { createAgentConfig } from "./agents"
 import { createCommandConfig } from "./commands"
 import { loadConfig } from "./config/load"
 import { createNodeProgressStore } from "./progress/node-progress"
+import { resolveGlobalPermission } from "./config/permissions"
 import { evaluateToolGate } from "./router/gates"
 import { createOpenCodeSessionAdapter } from "./session/adapter"
 import { createSessionOrchestrator } from "./session/orchestrator"
@@ -24,8 +25,9 @@ export function createPluginModule(): PluginModule {
         nodeProgress.recordEvent(store.readCurrent(), event)
       },
       config: async (hostConfig: Record<string, unknown>) => {
+        const globalPermission = resolveGlobalPermission(hostConfig.permission)
         hostConfig.agent = {
-          ...createAgentConfig(),
+          ...createAgentConfig({ globalPermission }),
           ...((hostConfig.agent as Record<string, unknown>) ?? {}),
         }
         hostConfig.command = {

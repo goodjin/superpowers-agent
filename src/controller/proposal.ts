@@ -6,7 +6,7 @@ export type WorkflowProposal = {
   entrypoint: WorkflowEntrypoint
   requires_confirmation: true
   markdown: string
-  next_action: "confirm_start" | "confirm_resume"
+  next_action: "confirm_prepare" | "confirm_start" | "confirm_resume"
 }
 
 export function buildWorkflowProposal(args: {
@@ -33,7 +33,9 @@ export function buildWorkflowProposal(args: {
     "",
     `Entrypoint: ${entrypoint}`,
     "",
-    "Next action: confirm to start the run.",
+    nextActionForWorkflow(workflow) === "confirm_prepare"
+      ? "Next action: confirm to prepare the planning run."
+      : "Next action: confirm to start the run.",
   ].join("\n")
 
   return {
@@ -41,7 +43,7 @@ export function buildWorkflowProposal(args: {
     entrypoint,
     requires_confirmation: true,
     markdown,
-    next_action: "confirm_start",
+    next_action: nextActionForWorkflow(workflow),
   }
 }
 
@@ -101,4 +103,8 @@ function entrypointFromMode(mode: string, workflow: WorkflowKind): WorkflowEntry
 
 function isWorkflowKind(value: string): value is WorkflowKind {
   return ["feature", "debug", "plan-only", "review", "verify-finish", "parallel-investigate"].includes(value)
+}
+
+function nextActionForWorkflow(workflow: WorkflowKind): WorkflowProposal["next_action"] {
+  return workflow === "feature" || workflow === "plan-only" ? "confirm_prepare" : "confirm_start"
 }

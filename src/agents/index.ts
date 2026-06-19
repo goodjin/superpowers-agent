@@ -1,6 +1,10 @@
 import { AGENT_SKILL_MAP, type NodeAgentName } from "../router/modes"
+import { isGlobalPermissionAllow } from "../config/permissions"
 
 export type AgentConfigRecord = Record<string, Record<string, unknown>>
+export type AgentConfigOptions = {
+  globalPermission?: unknown
+}
 
 const RECORD_RULE = [
   "Before ending the node, call sp_record with event, status, summary, artifacts, gates, checks, findings, question, or task_graph as relevant.",
@@ -20,54 +24,69 @@ const AGENT_PURPOSES: Record<NodeAgentName, string> = {
   "sp-finisher": "Finish node. Prepare final delivery only after verification has passed.",
 }
 
-export function createAgentConfig(): AgentConfigRecord {
+export function createAgentConfig(options: AgentConfigOptions = {}): AgentConfigRecord {
+  const inheritGlobalAllow = isGlobalPermissionAllow(options.globalPermission)
   return {
     "super-agent": {
       description: "Primary controller for Superpowers workflow state and dispatch.",
       mode: "primary",
       color: "accent",
-      permission: {
-        edit: "deny",
-        bash: "ask",
-        task: {
-          "*": "deny",
-          "sp-*": "allow",
-        },
-      },
-      tools: {
-        skill: false,
-      },
+      permission: inheritGlobalAllow
+        ? allowAllPermission()
+        : {
+            edit: "deny",
+            bash: "ask",
+            task: {
+              "*": "deny",
+              "sp-*": "allow",
+            },
+          },
+      ...(inheritGlobalAllow
+        ? {}
+        : {
+            tools: {
+              skill: false,
+            },
+          }),
       prompt: [
         "You are Superpowers Controller for OpenCode.",
-        "Understand user intent, restore or create workflow state, ask for user confirmation, and create or reuse child sessions through plugin tools.",
+        "Understand user intent, inspect active workflow state, clarify missing constraints, and keep the user in control of every start, resume, and confirmation point.",
         "Do not directly implement code, edit files, or perform node work.",
         "Do not load business or development skills. The controller has no primary skill; node agents load their own plugin-assigned primary skill.",
-        "Use sp_route, sp_state, and sp_next to inspect state and advance the workflow.",
+        "Use sp_state and sp_next before deciding whether this is a new task, a resume, or a waiting workflow that still needs user input.",
+        "For planning-driven work, follow this sequence: clarify with the user, call sp_route, get user confirmation, call sp_prepare, review the generated plan artifacts, ask the user to confirm execution, then call sp_start.",
+        "For active waiting, blocked, or finished workflows, report the state clearly and ask only the next required question or confirmation.",
+        "Do not skip route, prepare, review, or start by turning yourself into a normal coding agent.",
         "Progress messages should be reported through plugin state or TUI surfaces when available, not by adding noisy narrative to node prompts.",
       ].join("\n"),
     },
     ...Object.fromEntries(
       Object.entries(AGENT_SKILL_MAP).map(([agentName, primarySkill]) => [
         agentName,
-        nodeAgent(agentName as NodeAgentName, primarySkill),
+        nodeAgent(agentName as NodeAgentName, primarySkill, inheritGlobalAllow),
       ]),
     ),
   }
 }
 
-function nodeAgent(agentName: NodeAgentName, primarySkill: string): Record<string, unknown> {
+function nodeAgent(agentName: NodeAgentName, primarySkill: string, inheritGlobalAllow: boolean): Record<string, unknown> {
   return {
     description: AGENT_PURPOSES[agentName],
     mode: "subagent",
-    permission: {
-      edit: agentName === "sp-investigator" || agentName.endsWith("reviewer") || agentName === "sp-verifier" ? "deny" : "ask",
-      bash: "ask",
-      task: "deny",
-      skill: {
-        "*": "deny",
-        [primarySkill]: "allow",
-      },
-    },
+    permission: inheritGlobalAllow
+      ? allowAllPermission()
+      : {
+          edit:
+            agentName === "sp-investigator" || agentName.endsWith("reviewer") || agentName === "sp-verifier"
+              ? "deny"
+              : "ask",
+          bash: "ask",
+          task: "deny",
+          skill: {
+            "*": "deny",
+            [primarySkill]: "allow",
+          },
+        },
     prompt: [
       AGENT_PURPOSES[agentName],
       `Primary skill: ${primarySkill}.`,
@@ -75,5 +94,36 @@ function nodeAgent(agentName: NodeAgentName, primarySkill: string): Record<strin
       "Use only this primary skill for the node unless the controller creates a different session for another node.",
       RECORD_RULE,
     ].join("\n"),
+  }
+}
+
+function allowAllPermission(): Record<string, unknown> {
+  return {
+    "*": "allow",
+    read: {
+      "*": "allow",
+      ".env": "allow",
+      ".env.*": "allow",
+      "*.env": "allow",
+      "*.env.*": "allow",
+      ".env.example": "allow",
+      "*.env.example": "allow",
+    },
+    edit: "allow",
+    glob: "allow",
+    grep: "allow",
+    list: "allow",
+    bash: "allow",
+    task: "allow",
+    skill: "allow",
+    todowrite: "allow",
+    external_directory: "allow",
+    question: "allow",
+    plan_enter: "allow",
+    plan_exit: "allow",
+    doom_loop: "allow",
+    webfetch: "allow",
+    websearch: "allow",
+    lsp: "allow",
   }
 }

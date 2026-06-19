@@ -25,6 +25,7 @@ export function createInitialState(args: {
     project: args.project,
     session: args.session,
     parent_session_id: args.session,
+    activation: "active",
     workflow: workflowForMode(args.mode),
     entrypoint: workflowForMode(args.mode),
     limited_context: false,
@@ -62,12 +63,12 @@ export function applyRecord(state: WorkflowState, record: WorkflowRecord): Workf
 
   const now = new Date().toISOString()
   const artifactRefs = normalizeArtifactRefs(record.artifacts ?? {})
-  const nextPhase = phaseForRecord(state.mode, record)
+  const nextPhase = phaseForRecord(state, record)
   return {
     ...state,
     phase: nextPhase,
     current_phase: nextPhase,
-    status: statusForRecord(record),
+    status: statusForRecord(state, record),
     updated_at: now,
     gates: { ...state.gates, ...gateUpdates },
     artifacts: { ...state.artifacts, ...artifactRefs },
@@ -104,10 +105,11 @@ function workflowForMode(mode: WorkflowMode): WorkflowKind {
   }
 }
 
-function statusForRecord(record: WorkflowRecord): WorkflowState["status"] {
+function statusForRecord(state: WorkflowState, record: WorkflowRecord): WorkflowState["status"] {
   if (record.status === "needs_user") return "waiting_user"
   if (record.status === "blocked") return "blocked"
   if (record.status === "failed") return "failed"
+  if (state.activation === "draft" && record.event === "plan" && record.status === "passed") return "waiting_user"
   if (record.event === "finish" && record.status === "passed") return "passed"
   return "running"
 }
@@ -141,7 +143,7 @@ function initialPhase(mode: WorkflowMode): string {
   }
 }
 
-function phaseForRecord(stateMode: WorkflowMode, record: WorkflowRecord): string {
+function phaseForRecord(state: WorkflowState, record: WorkflowRecord): string {
   if (record.status === "needs_user") return "waiting-user"
   if (record.status === "blocked") return "blocked"
   switch (record.event) {
@@ -150,7 +152,8 @@ function phaseForRecord(stateMode: WorkflowMode, record: WorkflowRecord): string
     case "design":
       return record.status === "passed" ? "design-complete" : "design-retry"
     case "plan":
-      return record.status === "passed" ? "plan-complete" : "plan-retry"
+      if (record.status !== "passed") return "plan-retry"
+      return state.activation === "draft" ? "awaiting-plan-approval" : "plan-complete"
     case "debug":
       return record.status === "passed" ? "root-cause-found" : "debug-retry"
     case "red-test":
@@ -168,6 +171,6 @@ function phaseForRecord(stateMode: WorkflowMode, record: WorkflowRecord): string
     case "question":
       return "waiting-user"
     default:
-      return initialPhase(stateMode)
+      return initialPhase(state.mode)
   }
 }

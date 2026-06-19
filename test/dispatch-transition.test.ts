@@ -8,6 +8,7 @@ function state(overrides: Partial<WorkflowState> = {}): WorkflowState {
     project: "/repo",
     session: "session-main",
     parent_session_id: "session-main",
+    activation: "active",
     workflow: "feature",
     entrypoint: "feature",
     limited_context: false,

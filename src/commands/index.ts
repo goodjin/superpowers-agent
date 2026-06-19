@@ -4,6 +4,7 @@ const COMMANDS: Array<[string, string, string]> = [
   ["sp", "Route a request through Superpowers Controller", "Classify and route this request through sp_route: $ARGUMENTS"],
   ["sp-design", "Start or resume Superpowers design workflow", "Start design workflow for: $ARGUMENTS"],
   ["sp-plan", "Start or resume Superpowers planning workflow", "Start planning workflow for: $ARGUMENTS"],
+  ["sp-prepare", "Prepare a planning draft before execution starts", "Prepare a planning draft for: $ARGUMENTS"],
   ["sp-debug", "Start or resume Superpowers debugging workflow", "Start debugging workflow for: $ARGUMENTS"],
   ["sp-execute", "Execute the current Superpowers plan", "Execute planned workflow tasks for: $ARGUMENTS"],
   ["sp-review", "Run Superpowers review workflow", "Review current work or feedback: $ARGUMENTS"],

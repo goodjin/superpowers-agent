@@ -5,7 +5,7 @@ import { join } from "node:path"
 import { spawnSync } from "node:child_process"
 
 describe("deploy-superagent-runtime", () => {
-  test("persists global allow permissions and writes a TUI-attaching launcher", () => {
+  test("persists global allow permissions and writes a super-agent TUI launcher", () => {
     const tempHome = mkdtempSync(join(tmpdir(), "sp-superagent-home-"))
     const runtimeRoot = mkdtempSync(join(tmpdir(), "sp-superagent-runtime-"))
 
@@ -37,8 +37,10 @@ describe("deploy-superagent-runtime", () => {
     expect(tuiConfig.plugin).toEqual([`file://${process.cwd()}/dist/tui.js`])
 
     const launcher = readFileSync(launcherPath, "utf8")
-    expect(launcher).toContain(' web --hostname "$HOSTNAME" --port "$PORT"')
-    expect(launcher).toContain(' attach "http://$HOSTNAME:$PORT"')
-    expect(launcher).toContain('http://$HOSTNAME:$PORT')
+    expect(launcher).not.toContain(" web --hostname ")
+    expect(launcher).not.toContain(" attach ")
+    expect(launcher).toContain('PROJECT_DIR="${SUPERAGENT_PROJECT_DIR:-$PWD}"')
+    expect(launcher).not.toContain('PROJECT_DIR="$ROOT/project"')
+    expect(launcher).toContain('--agent "super-agent"')
   }, 30_000)
 })

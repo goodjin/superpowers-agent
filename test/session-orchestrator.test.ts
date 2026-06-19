@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import { createSessionOrchestrator } from "../src/session/orchestrator"
-import { buildNodeTaskPrompt } from "../src/session/templates"
+import { buildChildRequestId, buildNodeTaskPrompt } from "../src/session/templates"
 
 describe("buildNodeTaskPrompt", () => {
   test("builds implement task prompt with one primary skill and record contract", () => {
@@ -25,19 +25,44 @@ describe("buildNodeTaskPrompt", () => {
     expect(prompt).toContain("Do not include next_action")
     expect(prompt).toContain("artifacts/plan.md")
   })
+
+  test("adds a stable child request marker when e2e child prompts are enabled", () => {
+    process.env.OPENCODE_SUPERPOWERS_E2E_CHILD_REQUEST_MARKERS = "1"
+    try {
+      const prompt = buildNodeTaskPrompt({
+        run_id: "run-1",
+        node_id: "001-plan-draft",
+        workflow: "feature",
+        phase: "plan",
+        agent: "sp-planner",
+        primary_skill: "superpowers-writing-plans",
+        objective: "Write plan.",
+        required_artifacts: [{ name: "request", path: "request.md" }],
+        record_contract: {
+          event: "plan",
+          expected_artifacts: ["plan"],
+          allowed_gates: ["plan_written"],
+        },
+      })
+
+      expect(prompt).toContain(`[llm_request_id:${buildChildRequestId("001-plan-draft")}]`)
+    } finally {
+      delete process.env.OPENCODE_SUPERPOWERS_E2E_CHILD_REQUEST_MARKERS
+    }
+  })
 })
 
 describe("createSessionOrchestrator", () => {
   test("creates a node session and returns the rendered task packet", async () => {
-    const calls: Array<{ agent: string; prompt: string }> = []
+    const calls: Array<{ stage: "create" | "prompt"; agent: string; prompt?: string }> = []
     const progress: Array<{ stage: string; message: string }> = []
     const orchestrator = createSessionOrchestrator({
       async createNodeSession(input) {
-        calls.push({ agent: input.agent, prompt: input.prompt })
+        calls.push({ stage: "create", agent: input.agent })
         return "session-node"
       },
-      async continueNodeSession() {
-        throw new Error("unexpected reuse")
+      async continueNodeSession(input) {
+        calls.push({ stage: "prompt", agent: input.agent, prompt: input.prompt })
       },
       async showProgress(input) {
         progress.push({ stage: input.stage, message: input.message })
@@ -70,8 +95,10 @@ describe("createSessionOrchestrator", () => {
 
     expect(result).toMatchObject({ action: "create_session", session_id: "session-node" })
     expect(result.task_markdown).toContain("Primary skill: superpowers-brainstorming")
-    expect(calls[0]?.agent).toBe("sp-designer")
-    expect(calls[0]?.prompt).toContain("Create design.")
+    expect(calls).toEqual([
+      { stage: "create", agent: "sp-designer" },
+      { stage: "prompt", agent: "sp-designer", prompt: expect.stringContaining("Create design.") },
+    ])
     expect(progress).toEqual([
       {
         stage: "dispatch_started",
@@ -82,6 +109,49 @@ describe("createSessionOrchestrator", () => {
         message: "Created sp-designer for 001-design.",
       },
     ])
+  })
+
+  test("registers a created node before sending the first child prompt", async () => {
+    const order: string[] = []
+    const orchestrator = createSessionOrchestrator({
+      async createNodeSession() {
+        order.push("create")
+        return "session-node"
+      },
+      async continueNodeSession() {
+        order.push("prompt")
+      },
+      async showProgress() {},
+    })
+
+    await orchestrator.dispatch({
+      project: "/repo",
+      runID: "run-1",
+      parentSessionID: "session-main",
+      decision: {
+        action: "create_session",
+        phase: "plan",
+        agent: "sp-planner",
+        primary_skill: "superpowers-writing-plans",
+        reason: "plan next",
+      },
+      packet: {
+        run_id: "run-1",
+        node_id: "001-plan",
+        workflow: "feature",
+        phase: "plan",
+        agent: "sp-planner",
+        primary_skill: "superpowers-writing-plans",
+        objective: "Write plan.",
+        required_artifacts: [],
+        record_contract: { event: "plan", expected_artifacts: ["plan"], allowed_gates: ["plan_written"] },
+      },
+      async onSessionCreated() {
+        order.push("register")
+      },
+    })
+
+    expect(order).toEqual(["create", "register", "prompt"])
   })
 
   test("reuses an existing node session for retry dispatch", async () => {

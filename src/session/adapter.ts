@@ -5,7 +5,6 @@ export type SessionAdapter = {
     parentSessionID: string
     title: string
     agent: string
-    prompt: string
   }): Promise<string>
 
   continueNodeSession(input: {
@@ -34,6 +33,7 @@ type OpenCodePluginContext = {
 
 export function createOpenCodeSessionAdapter(ctx: OpenCodePluginContext): SessionAdapter {
   async function continueNodeSession(input: { sessionID: string; agent: string; prompt: string }): Promise<void> {
+    if (process.env.OPENCODE_SUPERPOWERS_DISABLE_CHILD_PROMPT === "1") return
     await callMethod(ctx.client.session, "prompt", {
       path: { id: input.sessionID },
       body: {
@@ -45,6 +45,9 @@ export function createOpenCodeSessionAdapter(ctx: OpenCodePluginContext): Sessio
 
   return {
     async createNodeSession(input) {
+      if (process.env.OPENCODE_SUPERPOWERS_DISABLE_CHILD_PROMPT === "1") {
+        return `session-suppressed-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
+      }
       const created = await callMethod(ctx.client.session, "create", {
         body: {
           parentID: input.parentSessionID,
@@ -54,13 +57,6 @@ export function createOpenCodeSessionAdapter(ctx: OpenCodePluginContext): Sessio
       })
       const sessionID = extractSessionID(created)
       if (!sessionID) throw new Error("OpenCode session.create did not return a session id")
-      if (process.env.OPENCODE_SUPERPOWERS_DISABLE_CHILD_PROMPT !== "1") {
-        await continueNodeSession({
-          sessionID,
-          agent: input.agent,
-          prompt: input.prompt,
-        })
-      }
       return sessionID
     },
     continueNodeSession,

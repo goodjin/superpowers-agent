@@ -69,21 +69,35 @@ export function createRecordHandler(deps: {
         decision,
         nodeID,
       })
+      let nodeRegistered = false
       const result = await deps.orchestrator.dispatch({
         project: current.project,
         runID: current.id,
         parentSessionID: current.parent_session_id ?? context.sessionID ?? current.session,
         decision,
         packet,
+        async onSessionCreated(input) {
+          deps.store.addNodeRun({
+            phase: decision.phase,
+            agent: decision.agent,
+            primary_skill: decision.primary_skill,
+            session_id: input.sessionID,
+            task_id: decision.task_id,
+            task_markdown: input.taskMarkdown,
+          })
+          nodeRegistered = true
+        },
       })
-      deps.store.addNodeRun({
-        phase: decision.phase,
-        agent: decision.agent,
-        primary_skill: decision.primary_skill,
-        session_id: result.session_id,
-        task_id: decision.task_id,
-        task_markdown: result.task_markdown,
-      })
+      if (!nodeRegistered) {
+        deps.store.addNodeRun({
+          phase: decision.phase,
+          agent: decision.agent,
+          primary_skill: decision.primary_skill,
+          session_id: result.session_id,
+          task_id: decision.task_id,
+          task_markdown: result.task_markdown,
+        })
+      }
       dispatches.push({
         action: result.action,
         agent: decision.agent,

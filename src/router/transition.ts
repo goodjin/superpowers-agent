@@ -38,6 +38,9 @@ export function decideNextDispatches(state: WorkflowState, record?: SpRecordInpu
   if (record.status === "needs_user") return [{ action: "wait_user", reason: "node requested user input" }]
   if (record.status === "blocked") return [{ action: "blocked", reason: record.summary }]
   if (record.status === "failed") return failedRecordDispatches(state, record)
+  if (state.activation === "draft" && record.event === "plan") {
+    return [{ action: "wait_user", reason: "plan is ready for controller review and user confirmation" }]
+  }
 
   switch (record.event) {
     case "intake":

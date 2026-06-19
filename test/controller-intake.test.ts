@@ -5,6 +5,7 @@ import { join } from "node:path"
 import { buildWorkflowProposal } from "../src/controller/proposal"
 import { prepareStartRun } from "../src/controller/intake"
 import { createProjectStore } from "../src/state/store"
+import { createPrepareTool } from "../src/tools/sp-prepare"
 import { createRouteTool } from "../src/tools/sp-route"
 import { createStartTool } from "../src/tools/sp-start"
 
@@ -31,7 +32,7 @@ describe("workflow proposal", () => {
     expect(proposal.entrypoint).toBe("feature")
     expect(proposal.requires_confirmation).toBe(true)
     expect(proposal.markdown).toContain("feature workflow")
-    expect(proposal.next_action).toBe("confirm_start")
+    expect(proposal.next_action).toBe("confirm_prepare")
   })
 
   test("builds a resume proposal when an active run exists", () => {
@@ -42,6 +43,7 @@ describe("workflow proposal", () => {
         project: "/repo",
         session: "session-main",
         parent_session_id: "session-main",
+        activation: "active",
         workflow: "feature",
         entrypoint: "feature",
         limited_context: false,
@@ -144,7 +146,7 @@ describe("sp_route and sp_start tools", () => {
     try {
       const store = createProjectStore(project)
       const progress: Array<{ stage: string; message: string }> = []
-      const start = createStartTool(store, {
+      const start = createStartTool(store, undefined, {
         async report(input) {
           progress.push({ stage: input.stage, message: input.message })
         },
@@ -166,6 +168,51 @@ describe("sp_route and sp_start tools", () => {
           message: "feature workflow run started from feature.",
         },
       ])
+    } finally {
+      rmSync(project, { recursive: true, force: true })
+    }
+  })
+
+  test("sp_prepare creates a planning draft and dispatches sp-planner", async () => {
+    const project = mkdtempSync(join(tmpdir(), "sp-prepare-"))
+    try {
+      const store = createProjectStore(project)
+      const prepare = createPrepareTool(
+        store,
+        {
+          async dispatch() {
+            return {
+              action: "create_session",
+              session_id: "session-planner",
+              task_markdown: "# Planner task",
+            }
+          },
+        },
+      )
+
+      const output = await prepare.execute(
+        {
+          request: "Add workflow gates",
+          workflow: "feature",
+          entrypoint: "feature",
+          proposal: "# Proposal\n\nPrepare feature workflow.",
+        },
+        toolContext,
+      )
+
+      const result = JSON.parse(toolOutput(output))
+      expect(result.state.activation).toBe("draft")
+      expect(result.state.current_phase).toBe("plan")
+      expect(store.readCurrent()?.node_runs[0]?.id).toBe("001-plan")
+      expect(result.dispatches).toEqual([
+        {
+          action: "create_session",
+          phase: "plan",
+          agent: "sp-planner",
+          session_id: "session-planner",
+        },
+      ])
+      expect(store.readCurrent()?.node_runs[0]?.agent).toBe("sp-planner")
     } finally {
       rmSync(project, { recursive: true, force: true })
     }
@@ -195,6 +242,68 @@ describe("sp_route and sp_start tools", () => {
       expect(readFileSync(join(runRoot, "changelog.md"), "utf8")).toContain("created")
       expect(existsSync(join(runRoot, "artifacts"))).toBe(true)
       expect(existsSync(join(runRoot, "nodes"))).toBe(true)
+    } finally {
+      rmSync(project, { recursive: true, force: true })
+    }
+  })
+
+  test("sp_start activates a prepared run and dispatches approved tasks", async () => {
+    const project = mkdtempSync(join(tmpdir(), "sp-start-activate-"))
+    try {
+      const store = createProjectStore(project)
+      const prepared = store.prepareRun({
+        workflow: "feature",
+        entrypoint: "feature",
+        goal: "Add workflow gates",
+        request: "# Request\n\nAdd workflow gates.",
+        proposal: "# Proposal\n\nPrepare feature workflow.",
+        parentSessionID: "session-main",
+      })
+      store.recordNodeResult({
+        input: {
+          event: "plan",
+          status: "passed",
+          summary: "Plan ready.",
+          artifacts: { plan: "# Plan" },
+          gates: { plan_written: true },
+          task_graph: {
+            tasks: [{ id: "T1", title: "Gate types", summary: "Add gate types", depends_on: [] }],
+          },
+        },
+      })
+
+      const start = createStartTool(
+        store,
+        {
+          async dispatch() {
+            return {
+              action: "create_session",
+              session_id: "session-impl",
+              task_markdown: "# Implement task",
+            }
+          },
+        },
+      )
+
+      const output = await start.execute(
+        {
+          run_id: prepared.id,
+        },
+        toolContext,
+      )
+
+      const result = JSON.parse(toolOutput(output))
+      expect(result.state.activation).toBe("active")
+      expect(result.dispatches).toEqual([
+        {
+          action: "create_session",
+          phase: "implement",
+          agent: "sp-implementer",
+          task_id: "T1",
+          session_id: "session-impl",
+        },
+      ])
+      expect(store.readCurrent()?.node_runs.some((run) => run.agent === "sp-implementer")).toBe(true)
     } finally {
       rmSync(project, { recursive: true, force: true })
     }
