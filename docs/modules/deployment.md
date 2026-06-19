@@ -35,6 +35,8 @@ scripts/deploy-superagent-runtime.sh restart
 
 The script rebuilds the server plugin entry at `dist/index.js` and the TUI plugin entry at `dist/tui.js`, syncs `assets/skills`, copies MiniMax provider config and `auth.json` when present, rewrites launchers, stops the previous background process from its pid file, and starts a fresh server.
 
+The isolated `opencode.json` plugin list includes both `file://.../dist/index.js` and `file://.../dist/tui.js`, so server hooks and TUI routes are loaded by the same runtime.
+
 The generated isolated `opencode.json` sets global OpenCode permissions to `allow`. Agent-level permissions from the plugin still come from `src/agents/index.ts`.
 
 ## Notes

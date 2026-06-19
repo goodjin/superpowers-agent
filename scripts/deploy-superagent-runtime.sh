@@ -36,7 +36,7 @@ const targetPath = `${configDir}/opencode.json`
 
 const target = {
   $schema: "https://opencode.ai/config.json",
-  plugin: [`file://${repoRoot}/dist/index.js`],
+  plugin: [`file://${repoRoot}/dist/index.js`, `file://${repoRoot}/dist/tui.js`],
   permission: "allow",
 }
 

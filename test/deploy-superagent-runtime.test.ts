@@ -29,6 +29,10 @@ describe("deploy-superagent-runtime", () => {
 
     const config = JSON.parse(readFileSync(configPath, "utf8"))
     expect(config.permission).toBe("allow")
+    expect(config.plugin).toEqual([
+      `file://${process.cwd()}/dist/index.js`,
+      `file://${process.cwd()}/dist/tui.js`,
+    ])
 
     const launcher = readFileSync(launcherPath, "utf8")
     expect(launcher).toContain(' web --hostname "$HOSTNAME" --port "$PORT"')
