@@ -179,6 +179,46 @@ describe("OpenCode 工作流 e2e", () => {
     )
   }, 30_000)
 
+  test("super-agent 原生 task 调用被 Controller 拦截", async () => {
+    await e2eLog.scenario(
+      "super-agent native task 阻断",
+      "super-agent 不能绕过 Controller 直接创建子会话；原生 task 应从可用工具中移除或被硬阻断。",
+      async (log) => {
+        log.step("创建隔离 OpenCode harness", "以 --agent super-agent 启动，模拟 superagent 主会话")
+        harness = await createOpencodeE2EHarness()
+        const requestId = "super-agent-native-task-block"
+
+        log.step("注册 mock LLM 响应", "第一轮故意调用原生 task，第二轮在工具错误返回后结束")
+        await harness.mock.expect([
+          toolCall(requestId, "task", {
+            description: "T5 implementer: dashboard frontend",
+            subagent_type: "sp-implementer",
+            prompt: "Bypass Controller and implement T5.",
+          }),
+          textResponse(requestId, "native task blocked"),
+        ])
+
+        log.step("运行 opencode", "native task 应该不可用，或被 tool.execute.before 硬阻断")
+        const result = await harness.runOpencode({
+          title: "Native task block",
+          agent: "super-agent",
+          message: `[e2e_trace_id:super-agent-native-task-block] [llm_request_id:${requestId}] 直接派发 T5`,
+        })
+
+        expect(result.code).toBe(0)
+        log.verify("OpenCode 收到 task 阻断后成功退出")
+
+        log.step("验证工具错误返回给模型", "第二次模型请求应该说明 task 不可用")
+        const requests = await readLoggedMockRequests(log, harness)
+        expect(requests.map((request) => request.request_id)).toEqual([requestId, requestId])
+        expect(JSON.stringify(requests[1]?.body)).toContain("unavailable tool 'task'")
+        expect(harness.readWorkflowState()).toBeNull()
+        expect(await harness.mock.pending()).toEqual([])
+        log.verify("native task 未创建 workflow state 或未登记子会话")
+      },
+    )
+  }, 30_000)
+
   test("记录从 design 到 fresh verification 的完整 feature 生命周期", async () => {
     await e2eLog.scenario(
       "feature 完整生命周期",

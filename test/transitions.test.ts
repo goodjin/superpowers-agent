@@ -91,4 +91,46 @@ describe("applyRecord", () => {
       }),
     ).toThrow("verification_fresh")
   })
+
+  test("rejects completion while task graph tasks are not all passed", () => {
+    const state = createInitialState({
+      id: "run-1",
+      project: "/repo",
+      session: "session-1",
+      mode: "verify-finish",
+      goal: "finish work",
+      gates: { verification_fresh: true },
+    })
+    const withTaskGraph = {
+      ...state,
+      task_graph: {
+        tasks: [
+          { id: "T1", title: "API", summary: "Build API", depends_on: [] },
+          { id: "T2", title: "Dashboard", summary: "Build dashboard", depends_on: ["T1"] },
+        ],
+      },
+      node_runs: [
+        {
+          id: "001-implement-T1",
+          task_id: "T1",
+          phase: "implement",
+          agent: "sp-implementer",
+          session_id: "session-t1",
+          status: "passed" as const,
+          attempts: 1,
+          started_at: "2026-06-20T00:00:00.000Z",
+          ended_at: "2026-06-20T00:01:00.000Z",
+        },
+      ],
+    }
+
+    expect(() =>
+      applyRecord(withTaskGraph, {
+        event: "finish",
+        status: "passed",
+        summary: "Ready to finish.",
+        artifacts: { finish_note: "Implemented available tasks." },
+      }),
+    ).toThrow("incomplete tasks")
+  })
 })

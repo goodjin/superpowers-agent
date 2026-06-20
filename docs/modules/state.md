@@ -70,3 +70,5 @@ state 模块负责 workflow run 的本地持久化、artifact 写入、task grap
 ## Task Graph
 
 `normalizeTaskGraph()` 会拒绝未知依赖，并为共享可写文件增加隐式依赖。`getRunnableTasks()` 只返回依赖已 passed、未 running、未 failed 的任务；失败任务不会启动依赖它的任务。
+
+`finish` 记录在 `verification_fresh` 之外还会检查 `task_graph`：如果 run 带有 task graph，所有 graph task 都必须已经有 matching `node_runs[].task_id` 且状态为 `passed`。这可以防止 workflow 在 T5/T6/T7 这类任务仍未登记或未完成时进入 `finished/passed`，也避免主会话绕过 Controller 后让 TUI 失去追踪对象。

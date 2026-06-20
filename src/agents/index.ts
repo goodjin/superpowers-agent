@@ -32,22 +32,16 @@ export function createAgentConfig(options: AgentConfigOptions = {}): AgentConfig
       mode: "primary",
       color: "accent",
       permission: inheritGlobalAllow
-        ? allowAllPermission()
+        ? allowWorkflowPermission({ task: "deny", skill: "deny" })
         : {
             edit: "deny",
             bash: "ask",
-            task: {
-              "*": "deny",
-              "sp-*": "allow",
-            },
+            task: "deny",
           },
-      ...(inheritGlobalAllow
-        ? {}
-        : {
-            tools: {
-              skill: false,
-            },
-          }),
+      tools: {
+        skill: false,
+        task: false,
+      },
       prompt: [
         "You are Superpowers Controller for OpenCode.",
         "Understand user intent, inspect active workflow state, clarify missing constraints, and keep the user in control of every start, resume, and confirmation point.",
@@ -57,6 +51,7 @@ export function createAgentConfig(options: AgentConfigOptions = {}): AgentConfig
         "For planning-driven work, follow this sequence: clarify with the user, call sp_route, get user confirmation, call sp_prepare, review the generated plan artifacts, ask the user to confirm execution, then call sp_start.",
         "For active waiting, blocked, or finished workflows, report the state clearly and ask only the next required question or confirmation.",
         "Do not skip route, prepare, review, or start by turning yourself into a normal coding agent.",
+        "Never call the native task tool. Child node sessions must be created by Superpowers tools so state.node_runs is registered before the child prompt starts.",
         "Progress messages should be reported through plugin state or TUI surfaces when available, not by adding noisy narrative to node prompts.",
       ].join("\n"),
     },
@@ -74,7 +69,7 @@ function nodeAgent(agentName: NodeAgentName, primarySkill: string, inheritGlobal
     description: AGENT_PURPOSES[agentName],
     mode: "subagent",
     permission: inheritGlobalAllow
-      ? allowAllPermission()
+      ? allowWorkflowPermission({ task: "deny" })
       : {
           edit:
             agentName === "sp-investigator" || agentName.endsWith("reviewer") || agentName === "sp-verifier"
@@ -87,6 +82,9 @@ function nodeAgent(agentName: NodeAgentName, primarySkill: string, inheritGlobal
             [primarySkill]: "allow",
           },
         },
+    tools: {
+      task: false,
+    },
     prompt: [
       AGENT_PURPOSES[agentName],
       `Primary skill: ${primarySkill}.`,
@@ -97,9 +95,8 @@ function nodeAgent(agentName: NodeAgentName, primarySkill: string, inheritGlobal
   }
 }
 
-function allowAllPermission(): Record<string, unknown> {
+function allowWorkflowPermission(overrides: { task?: "allow" | "deny"; skill?: "allow" | "deny" } = {}): Record<string, unknown> {
   return {
-    "*": "allow",
     read: {
       "*": "allow",
       ".env": "allow",
@@ -114,8 +111,8 @@ function allowAllPermission(): Record<string, unknown> {
     grep: "allow",
     list: "allow",
     bash: "allow",
-    task: "allow",
-    skill: "allow",
+    task: overrides.task ?? "allow",
+    skill: overrides.skill ?? "allow",
     todowrite: "allow",
     external_directory: "allow",
     question: "allow",

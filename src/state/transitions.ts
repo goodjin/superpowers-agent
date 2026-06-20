@@ -54,6 +54,13 @@ export function applyRecord(state: WorkflowState, record: WorkflowRecord): Workf
     throw new Error("sp_record rejected: verification_fresh is required before completion records")
   }
 
+  if (record.event === "finish" && record.status === "passed") {
+    const incomplete = incompleteTaskIDs(state)
+    if (incomplete.length > 0) {
+      throw new Error(`sp_record rejected: task_graph has incomplete tasks before completion records: ${incomplete.join(", ")}`)
+    }
+  }
+
   for (const [gate] of enabledGateUpdates) {
     const requiredArtifact = GATE_ARTIFACTS[gate as WorkflowGate]
     if (requiredArtifact && !record.artifacts?.[requiredArtifact] && !state.artifacts[requiredArtifact]) {
@@ -86,6 +93,12 @@ export function applyRecord(state: WorkflowState, record: WorkflowRecord): Workf
       },
     ],
   }
+}
+
+function incompleteTaskIDs(state: WorkflowState): string[] {
+  if (!state.task_graph?.tasks.length) return []
+  const passed = new Set(state.node_runs.filter((run) => run.task_id && run.status === "passed").map((run) => run.task_id as string))
+  return state.task_graph.tasks.map((task) => task.id).filter((taskID) => !passed.has(taskID))
 }
 
 function workflowForMode(mode: WorkflowMode): WorkflowKind {

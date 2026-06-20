@@ -14,6 +14,14 @@ export function evaluateToolGate(args: {
   tool: string
   args: Record<string, unknown>
 }): GateResult {
+  if (isNativeTaskTool(args.tool) && isSuperpowersAgent(args.agent)) {
+    return {
+      allowed: false,
+      severity: "blocked",
+      reason: `${args.agent} cannot call native task; use sp_start or sp_record so Controller registers node_runs before child prompts`,
+    }
+  }
+
   const state = args.state
   if (!state || !isMutatingTool(args.config, args.tool, args.args)) {
     return allow()
@@ -40,6 +48,14 @@ export function evaluateToolGate(args: {
   }
 
   return allow()
+}
+
+function isNativeTaskTool(tool: string): boolean {
+  return tool.toLowerCase().replace(/^mcp_/, "") === "task"
+}
+
+function isSuperpowersAgent(agent: string | undefined): boolean {
+  return agent === "super-agent" || agent?.startsWith("sp-") === true
 }
 
 export function evaluateCompletionGate(args: {

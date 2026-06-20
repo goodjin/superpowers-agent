@@ -106,6 +106,22 @@ describe("evaluateToolGate", () => {
     expect(result.allowed).toBe(false)
     expect(result.reason).toContain("super-agent")
   })
+
+  test("superpowers agents cannot call native task even without active state", () => {
+    for (const agent of ["super-agent", "sp-implementer"]) {
+      const result = evaluateToolGate({
+        config: { ...DEFAULT_CONFIG, mode: "off" },
+        state: null,
+        agent,
+        tool: "task",
+        args: { subagent_type: "sp-implementer", description: "T5" },
+      })
+
+      expect(result.allowed, agent).toBe(false)
+      expect(result.severity, agent).toBe("blocked")
+      expect(result.reason, agent).toContain("node_runs")
+    }
+  })
 })
 
 describe("evaluateCompletionGate", () => {

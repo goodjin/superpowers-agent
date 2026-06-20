@@ -41,8 +41,10 @@ agents 模块负责注入 Superpowers Controller 的 OpenCode agent 配置。`su
 
 - `super-agent` 不加载业务技能，也不执行节点工作。
 - `super-agent` 禁用 `tools.skill`，避免全局 skill 进入控制器上下文。
+- `super-agent` 禁止调用原生 `task` tool，并通过 `permission.task = deny`、`tools.task = false` 和 `tool.execute.before` 三层限制；子会话只能由 `sp_start` / `sp_record` 驱动的 Controller dispatch 创建，保证 `state.node_runs` 先登记再发送 child prompt。
 - 对 planning-driven workflow，`super-agent` 负责 `sp_route -> sp_prepare -> plan review -> user confirm -> sp_start` 这一段控制链。
 - 节点 agent 保留 `skill` tool，但 `permission.skill` 只允许 router 分配的 primary skill，并拒绝其它全局 skill。
+- 节点 agent 也禁止嵌套调用原生 `task` tool，避免节点绕过 Controller 继续派生未登记子会话。
 - 节点 agent prompt 只声明一个 primary skill；需要其他 skill 时，由控制器创建或复用另一个节点 session。
 
 ## Permission Inheritance
@@ -51,10 +53,10 @@ agents 模块负责注入 Superpowers Controller 的 OpenCode agent 配置。`su
 
 When global `permission` is not `"allow"`, agents keep the default workflow boundaries:
 
-- `super-agent` cannot edit files directly, asks before bash, can dispatch only `sp-*` tasks, and has `tools.skill` disabled.
+- `super-agent` cannot edit files directly, asks before bash, cannot use native `task`, and has `tools.skill` disabled.
 - Node agents ask or deny edits according to their role, ask before bash, deny nested tasks, and can load only their primary skill.
 
-When global `permission` is `"allow"`, plugin agents inherit that posture by emitting explicit allow rules for read, edit, bash, task, skill, external directory, question, plan, and related OpenCode permission points. In this mode `super-agent` also stops setting `tools.skill = false`, so the plugin does not reintroduce permission prompts or hidden tool restrictions after the runtime has been configured as allow-all.
+When global `permission` is `"allow"`, plugin agents inherit that posture for read, edit, bash, external directory, question, plan, and related OpenCode permission points. The exception is `task`: `super-agent` and node agents still deny the native `task` tool because child session creation is a Superpowers control-plane responsibility. `super-agent` also denies `skill` in this mode; node agents keep skill access so they can load their assigned primary skill.
 
 ## Notes
 
