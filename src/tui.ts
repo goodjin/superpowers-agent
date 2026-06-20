@@ -1,5 +1,6 @@
 import "@opentui/solid/runtime-plugin-support"
 import { createElement, insert } from "@opentui/solid"
+import { createSignal, onCleanup, type Accessor } from "solid-js"
 import { createNodeProgressStore } from "./progress/node-progress"
 import { createProjectStore } from "./state/store"
 import { buildProgressPanelViewModel, renderCompactProgressText, renderProgressPanelText } from "./tui/progress-panel"
@@ -71,14 +72,35 @@ export function createTuiPluginModule() {
   }
 }
 
+type TextSource = string | Accessor<string>
+
+type CompactProgressSlotOptions = {
+  refreshMs?: number
+}
+
 export function createCompactProgressSlot(
   api: TuiApi,
-  renderText: (value: string) => unknown = createTextElement,
+  renderText: (value: TextSource) => unknown = createTextElement,
+  options: CompactProgressSlotOptions = {},
 ): (_context?: unknown, props?: Record<string, unknown>) => unknown {
   return (_context, props) => {
-    const text = safeCompactProgressText(api, props?.session_id)
-    return text ? renderText(text) : null
+    const sessionID = slotSessionID(props)
+    const refreshMs = options.refreshMs ?? 1000
+    if (refreshMs <= 0) {
+      const text = safeCompactProgressText(api, sessionID)
+      return text ? renderText(text) : null
+    }
+    const [text, setText] = createSignal(safeCompactProgressText(api, sessionID))
+    const timer = setInterval(() => {
+      setText(safeCompactProgressText(api, sessionID))
+    }, refreshMs)
+    onCleanup(() => clearInterval(timer))
+    return renderText(text)
   }
+}
+
+function slotSessionID(props?: Record<string, unknown>): unknown {
+  return typeof props?.session_id === "string" ? props.session_id : props?.sessionID
 }
 
 function safeCompactProgressText(api: TuiApi, sessionID?: unknown): string {
@@ -89,7 +111,7 @@ function safeCompactProgressText(api: TuiApi, sessionID?: unknown): string {
   }
 }
 
-function createTextElement(value: string): unknown {
+function createTextElement(value: TextSource): unknown {
   const node = createElement("text")
   insert(node, value)
   return node
@@ -98,11 +120,15 @@ function createTextElement(value: string): unknown {
 function currentProgressModel(api: TuiApi, sessionID?: unknown) {
   const workflow = createProjectStore(api.state.path.directory)
   const state = workflow.readCurrent()
-  if (typeof sessionID === "string" && state?.parent_session_id && sessionID !== state.parent_session_id) {
+  if (typeof sessionID === "string" && state && !isWorkflowSession(state, sessionID)) {
     return buildProgressPanelViewModel(null, {}, {})
   }
   const progress = state ? createNodeProgressStore(api.state.path.directory).readRun(state) : {}
   return buildProgressPanelViewModel(state, progress, liveStatusBySession(api, state))
+}
+
+function isWorkflowSession(state: WorkflowState, sessionID: string): boolean {
+  return sessionID === state.parent_session_id || state.node_runs.some((node) => node.session_id === sessionID)
 }
 
 function liveStatusBySession(api: TuiApi, state: WorkflowState | null): Record<string, string> {

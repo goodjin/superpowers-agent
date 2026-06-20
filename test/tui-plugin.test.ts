@@ -87,12 +87,24 @@ describe("Superpowers TUI plugin", () => {
       expect(Object.keys(slots).sort()).toEqual(["session_prompt_right", "sidebar_footer"])
       expect(typeof slots.session_prompt_right).toBe("function")
       expect(typeof slots.sidebar_footer).toBe("function")
-      const compactSlot = createCompactProgressSlot(api, (value) => ({ type: "text", value }))
+      const compactSlot = createCompactProgressSlot(
+        api,
+        (value) => ({ type: "text", value: typeof value === "function" ? value() : value }),
+        { refreshMs: 0 },
+      )
       expect(compactSlot(undefined, { session_id: "session-main" })).toEqual({
         type: "text",
         value: "SP: sp-implementer T1 running/busy - bash running",
       })
-      expect(compactSlot(undefined, { session_id: "session-child" })).toBeNull()
+      expect(compactSlot(undefined, { session_id: "session-child" })).toEqual({
+        type: "text",
+        value: "SP: sp-implementer T1 running/busy - bash running",
+      })
+      expect(compactSlot(undefined, { sessionID: "session-main" })).toEqual({
+        type: "text",
+        value: "SP: sp-implementer T1 running/busy - bash running",
+      })
+      expect(compactSlot(undefined, { session_id: "session-other" })).toBeNull()
       commands.find((command) => command.value === "superpowers.progress")?.onSelect?.()
       expect(navigated).toEqual([{ name: "superpowers-progress", params: undefined }])
     } finally {

@@ -71,3 +71,5 @@ TUI entry 暴露在 package 的 `./tui` export。
 常驻行只显示 active workflow 中最新 running node 的 agent、task、durable/live status 和最新 progress 摘要。完整历史仍通过 `superpowers-progress` route 查看。
 
 slot render 必须返回 OpenTUI/Solid element，而不是裸字符串。TUI 入口会加载 `@opentui/solid/runtime-plugin-support`，再使用 `@opentui/solid` 创建 `text` element，并对 workflow/progress 读取异常做 fail-closed 处理；读取失败时只显示 `SP: progress unavailable`，避免异常进入 host TUI 渲染器。
+
+常驻 slot 不能依赖父会话消息流触发刷新。child session 写入 `progress.jsonl` 时，parent session 的 `time_updated` 可能不变，因此 compact surface 需要自己定时重读 workflow/progress。slot 只在当前 session 属于 active workflow 时展示，包括 parent session 和 `node_runs[].session_id` 中登记过的 child session；无关 session 继续隐藏。
