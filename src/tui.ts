@@ -1,8 +1,19 @@
 import "@opentui/solid/runtime-plugin-support"
-import { createElement, insert } from "@opentui/solid"
-import { createSignal, onCleanup, type Accessor } from "solid-js"
+import { createElement, insert, setProp } from "@opentui/solid"
+import { createEffect, createSignal, onCleanup, type Accessor } from "solid-js"
 import { createNodeProgressStore } from "./progress/node-progress"
+import type { NodeProgressEntry } from "./progress/node-progress"
 import { createProjectStore } from "./state/store"
+import {
+  buildQuestionActions,
+  createHttpQuestionBridgeClient,
+  filterWorkflowQuestionRequests,
+  renderCompactQuestionText,
+  renderQuestionBridgeText,
+  type QuestionAction,
+  type QuestionBridgeClient,
+  type QuestionRequest,
+} from "./tui/question-bridge"
 import { buildProgressPanelViewModel, renderCompactProgressText, renderProgressPanelText } from "./tui/progress-panel"
 import type { WorkflowState } from "./state/types"
 
@@ -35,23 +46,29 @@ export function createTuiPluginModule() {
     id: "superpowers-controller",
     async tui(api: TuiApi, _options?: unknown, _meta?: unknown) {
       const disposers: Array<() => void> = []
+      const questionClient = createHttpQuestionBridgeClient()
       disposers.push(api.route.register([
         {
           name: "superpowers-progress",
           render() {
-            const workflow = createProjectStore(api.state.path.directory)
-            const state = workflow.readCurrent()
+            const state = currentWorkflowState(api)
             const progress = state ? createNodeProgressStore(api.state.path.directory).readRun(state) : {}
             return renderProgressPanelText(
               buildProgressPanelViewModel(state, progress, liveStatusBySession(api, state)),
             )
           },
         },
+        {
+          name: "superpowers-questions",
+          render() {
+            return createQuestionBridgePanel(api, questionClient)
+          },
+        },
       ]))
       api.slots?.register({
         slots: {
-          session_prompt_right: createCompactProgressSlot(api),
-          sidebar_footer: createCompactProgressSlot(api),
+          session_prompt_right: createCompactProgressSlot(api, createTextElement, { questionClient }),
+          sidebar_footer: createCompactProgressSlot(api, createTextElement, { questionClient }),
         },
       })
       if (api.command) {
@@ -62,6 +79,13 @@ export function createTuiPluginModule() {
             description: "Open the Superpowers Controller progress panel",
             category: "Superpowers",
             onSelect: () => api.route.navigate("superpowers-progress"),
+          },
+          {
+            title: "Superpowers Child Questions",
+            value: "superpowers.questions",
+            description: "Review and answer pending child-session questions",
+            category: "Superpowers",
+            onSelect: () => api.route.navigate("superpowers-questions"),
           },
         ]))
       }
@@ -76,6 +100,7 @@ type TextSource = string | Accessor<string>
 
 type CompactProgressSlotOptions = {
   refreshMs?: number
+  questionClient?: QuestionBridgeClient
 }
 
 export function createCompactProgressSlot(
@@ -92,8 +117,9 @@ export function createCompactProgressSlot(
     }
     const [text, setText] = createSignal(safeCompactProgressText(api, sessionID))
     const timer = setInterval(() => {
-      setText(safeCompactProgressText(api, sessionID))
+      void refreshCompactProgressText(api, sessionID, options.questionClient, setText)
     }, refreshMs)
+    void refreshCompactProgressText(api, sessionID, options.questionClient, setText)
     onCleanup(() => clearInterval(timer))
     return renderText(text)
   }
@@ -105,9 +131,31 @@ function slotSessionID(props?: Record<string, unknown>): unknown {
 
 function safeCompactProgressText(api: TuiApi, sessionID?: unknown): string {
   try {
-    return renderCompactProgressText(currentProgressModel(api, sessionID))
+    const state = currentWorkflowState(api)
+    const progress = state ? createNodeProgressStore(api.state.path.directory).readRun(state) : {}
+    return renderCompactProgressText(progressModel(api, state, progress, sessionID))
   } catch {
     return "SP: progress unavailable"
+  }
+}
+
+async function refreshCompactProgressText(
+  api: TuiApi,
+  sessionID: unknown,
+  client: QuestionBridgeClient | undefined,
+  setText: (value: string) => void,
+): Promise<void> {
+  try {
+    if (!client) {
+      setText(safeCompactProgressText(api, sessionID))
+      return
+    }
+    const state = currentWorkflowState(api)
+    const questions = filterWorkflowQuestionRequests(state, await client.list(api.state.path.directory))
+    const questionText = renderCompactQuestionText(questions)
+    setText(questionText || safeCompactProgressText(api, sessionID))
+  } catch {
+    setText(safeCompactProgressText(api, sessionID))
   }
 }
 
@@ -118,12 +166,25 @@ function createTextElement(value: TextSource): unknown {
 }
 
 function currentProgressModel(api: TuiApi, sessionID?: unknown) {
+  const state = currentWorkflowState(api)
+  const progress = state ? createNodeProgressStore(api.state.path.directory).readRun(state) : {}
+  return progressModel(api, state, progress, sessionID)
+}
+
+function currentWorkflowState(api: TuiApi): WorkflowState | null {
   const workflow = createProjectStore(api.state.path.directory)
-  const state = workflow.readCurrent()
+  return workflow.readCurrent()
+}
+
+function progressModel(
+  api: TuiApi,
+  state: WorkflowState | null,
+  progress: Record<string, NodeProgressEntry[]>,
+  sessionID?: unknown,
+) {
   if (typeof sessionID === "string" && state && !isWorkflowSession(state, sessionID)) {
     return buildProgressPanelViewModel(null, {}, {})
   }
-  const progress = state ? createNodeProgressStore(api.state.path.directory).readRun(state) : {}
   return buildProgressPanelViewModel(state, progress, liveStatusBySession(api, state))
 }
 
@@ -143,6 +204,83 @@ function formatSessionStatus(status: { type: string; attempt?: number; message?:
   if (!status) return "unknown"
   if (status.type === "retry") return `retry ${status.attempt ?? "?"}${status.message ? `: ${status.message}` : ""}`
   return status.type
+}
+
+function createQuestionBridgePanel(
+  api: TuiApi,
+  client: QuestionBridgeClient = createHttpQuestionBridgeClient(),
+  refreshMs = 1000,
+): unknown {
+  const [status, setStatus] = createSignal("Loading child questions...")
+  const [requests, setRequests] = createSignal<QuestionRequest[]>([])
+  const [actions, setActions] = createSignal<QuestionAction[]>([])
+
+  const refresh = async () => {
+    try {
+      const state = currentWorkflowState(api)
+      const nextRequests = filterWorkflowQuestionRequests(state, await client.list(api.state.path.directory))
+      setRequests(nextRequests)
+      setActions(buildQuestionActions(nextRequests))
+      setStatus(renderQuestionBridgeText(nextRequests))
+    } catch (error) {
+      setRequests([])
+      setActions([])
+      setStatus(`Question bridge unavailable: ${error instanceof Error ? error.message : String(error)}`)
+    }
+  }
+
+  void refresh()
+  const timer = setInterval(() => void refresh(), refreshMs)
+  onCleanup(() => clearInterval(timer))
+
+  const root = createElement("box")
+  setProp(root, "style", { flexDirection: "column", width: "100%", height: "100%" })
+
+  const body = createElement("text")
+  insert(body, status)
+  insert(root, body)
+
+  const select = createElement("select")
+  setProp(select, "focused", true)
+  setProp(select, "showDescription", true)
+  setProp(select, "height", 12)
+  setProp(select, "onSelect", (_index: number, option: { value?: QuestionAction } | null) => {
+    const action = option?.value
+    if (action) void submitQuestionAction(client, action, refresh, setStatus)
+  })
+  createEffect(() => {
+    setProp(select, "options", actions().map((action) => ({
+      name: action.label,
+      description: action.description,
+      value: action,
+    })))
+  })
+  insert(root, select)
+
+  const footer = createElement("text")
+  insert(footer, () => requests().length > 0 ? "Use arrows to choose an action, Enter to submit." : "")
+  insert(root, footer)
+
+  return root
+}
+
+async function submitQuestionAction(
+  client: QuestionBridgeClient,
+  action: QuestionAction,
+  refresh: () => Promise<void>,
+  setStatus: (value: string) => void,
+): Promise<void> {
+  setStatus(`${action.label} submitted...`)
+  try {
+    if (action.type === "reply") {
+      await client.reply(action.sessionID, action.requestID, action.answers)
+    } else {
+      await client.reject(action.sessionID, action.requestID)
+    }
+    await refresh()
+  } catch (error) {
+    setStatus(`Question action failed: ${error instanceof Error ? error.message : String(error)}`)
+  }
 }
 
 export default createTuiPluginModule()
