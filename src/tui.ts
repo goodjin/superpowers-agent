@@ -18,13 +18,10 @@ import { buildProgressPanelViewModel, renderCompactProgressText, renderProgressP
 import type { WorkflowState } from "./state/types"
 
 export const RESIDENT_PROGRESS_SLOT_NAMES = [
-  "session_prompt_right",
   "sidebar_footer",
   "sidebar_content",
   "home_bottom",
   "app_bottom",
-  "home_footer",
-  "home_prompt_right",
 ] as const
 
 type TuiApi = {

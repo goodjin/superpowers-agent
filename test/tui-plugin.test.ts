@@ -85,10 +85,12 @@ describe("Superpowers TUI plugin", () => {
       expect(String(routes[0]?.render())).toContain("Superpowers Progress")
       expect(commands.map((command) => command.value).sort()).toEqual(["superpowers.progress", "superpowers.questions"])
       expect(Object.keys(slots).sort()).toEqual([...RESIDENT_PROGRESS_SLOT_NAMES].sort())
-      expect(typeof slots.session_prompt_right).toBe("function")
       expect(typeof slots.sidebar_footer).toBe("function")
       expect(typeof slots.sidebar_content).toBe("function")
+      expect(typeof slots.home_bottom).toBe("function")
       expect(typeof slots.app_bottom).toBe("function")
+      expect(slots.session_prompt_right).toBeUndefined()
+      expect(slots.home_prompt_right).toBeUndefined()
       const compactSlot = createCompactProgressSlot(
         api,
         (value) => ({ type: "text", value: typeof value === "function" ? value() : value }),

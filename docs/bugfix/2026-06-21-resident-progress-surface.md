@@ -34,3 +34,7 @@
 ## 设计建议
 
 如果 OpenCode 后续提供官方固定 status bar slot，应把 resident slot 名单收敛到官方 slot，并保留当前多 slot 注册作为兼容层。
+
+## 后续调整
+
+用户反馈启动时 compact progress 进入输入框附近会挤占其他元素。因此后续修正把 resident slot 名单收敛为 `home_bottom`, `app_bottom`, `sidebar_content`, `sidebar_footer`，并移除 `session_prompt_right`, `home_prompt_right`, `home_footer`。主会话底部和右侧栏继续承载子会话进度，prompt/input 区域不再放 Superpowers 常驻内容。
