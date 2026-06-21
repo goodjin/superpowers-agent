@@ -7,6 +7,7 @@ export type ProgressPanelRow = {
   agent: string
   phase: string
   durable_status: string
+  activity_status: "active" | "stalled"
   session_id: string
   live_status: string
   latest_summary: string
@@ -21,10 +22,13 @@ export type ProgressPanelViewModel = {
   rows: ProgressPanelRow[]
 }
 
+export const STALLED_PROGRESS_AFTER_MS = 30_000
+
 export function buildProgressPanelViewModel(
   state: WorkflowState | null,
   progressByNode: Record<string, NodeProgressEntry[]>,
   liveStatusBySession: Record<string, string>,
+  now: Date = new Date(),
 ): ProgressPanelViewModel {
   if (!state) {
     return {
@@ -42,12 +46,14 @@ export function buildProgressPanelViewModel(
     rows: state.node_runs.map((node) => {
       const progress = progressByNode[node.id] ?? []
       const latest = progress.at(-1)
+      const observedAt = latest?.at ?? node.started_at
       return {
         node_id: node.id,
         task_id: node.task_id,
         agent: node.agent,
         phase: node.phase,
         durable_status: node.status,
+        activity_status: node.status === "running" && isStalled(observedAt, now) ? "stalled" : "active",
         session_id: node.session_id,
         live_status: liveStatusBySession[node.session_id] ?? "unknown",
         latest_summary: latest?.summary ?? "no progress recorded",
@@ -67,7 +73,7 @@ export function renderProgressPanelText(model: ProgressPanelViewModel): string {
     const task = row.task_id ? ` ${row.task_id}` : ""
     lines.push(`${row.node_id}${task}`)
     lines.push(`  ${row.agent} / ${row.phase}`)
-    lines.push(`  status: ${row.durable_status} / ${row.live_status}`)
+    lines.push(`  status: ${row.durable_status} / ${row.live_status} / ${row.activity_status}`)
     lines.push(`  session: ${row.session_id}`)
     lines.push(`  latest: ${row.latest_summary}`)
     if (row.latest_detail) lines.push(`  detail: ${row.latest_detail}`)
@@ -84,9 +90,18 @@ export function renderCompactProgressText(model: ProgressPanelViewModel): string
 
   const task = row.task_id ? ` ${row.task_id}` : ""
   const live = row.live_status === "unknown" ? row.durable_status : `${row.durable_status}/${row.live_status}`
-  return truncateLine(`SP: ${row.agent}${task} ${live} - ${row.latest_summary}`)
+  const activity = row.activity_status === "stalled" ? "/stalled" : ""
+  return truncateLine(`SP: ${row.agent}${task} ${live}${activity} - ${row.latest_summary}`)
 }
 
 function truncateLine(value: string, max = 120): string {
   return value.length > max ? `${value.slice(0, max - 3)}...` : value
+}
+
+function isStalled(observedAt: string | undefined, now: Date): boolean {
+  if (!observedAt) return false
+  const observed = Date.parse(observedAt)
+  const current = now.getTime()
+  if (!Number.isFinite(observed) || !Number.isFinite(current)) return false
+  return current - observed >= STALLED_PROGRESS_AFTER_MS
 }

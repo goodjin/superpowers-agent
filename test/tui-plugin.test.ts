@@ -4,7 +4,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { createNodeProgressStore } from "../src/progress/node-progress"
 import { createProjectStore } from "../src/state/store"
-import { createCompactProgressSlot, createTuiPluginModule } from "../src/tui"
+import { createCompactProgressSlot, createTuiPluginModule, RESIDENT_PROGRESS_SLOT_NAMES } from "../src/tui"
 
 describe("Superpowers TUI plugin", () => {
   test("registers the progress route and persistent progress slots", async () => {
@@ -31,7 +31,7 @@ describe("Superpowers TUI plugin", () => {
         task_markdown: "Implement task",
       })
       createNodeProgressStore(project).append(state.id, {
-        at: "2026-06-19T00:01:00.000Z",
+        at: new Date().toISOString(),
         kind: "tool_running",
         session_id: "session-child",
         node_id: node.id,
@@ -84,14 +84,20 @@ describe("Superpowers TUI plugin", () => {
       expect(routes.map((route) => route.name).sort()).toEqual(["superpowers-progress", "superpowers-questions"])
       expect(String(routes[0]?.render())).toContain("Superpowers Progress")
       expect(commands.map((command) => command.value).sort()).toEqual(["superpowers.progress", "superpowers.questions"])
-      expect(Object.keys(slots).sort()).toEqual(["session_prompt_right", "sidebar_footer"])
+      expect(Object.keys(slots).sort()).toEqual([...RESIDENT_PROGRESS_SLOT_NAMES].sort())
       expect(typeof slots.session_prompt_right).toBe("function")
       expect(typeof slots.sidebar_footer).toBe("function")
+      expect(typeof slots.sidebar_content).toBe("function")
+      expect(typeof slots.app_bottom).toBe("function")
       const compactSlot = createCompactProgressSlot(
         api,
         (value) => ({ type: "text", value: typeof value === "function" ? value() : value }),
         { refreshMs: 0 },
       )
+      expect(compactSlot()).toEqual({
+        type: "text",
+        value: "SP: sp-implementer T1 running/busy - bash running",
+      })
       expect(compactSlot(undefined, { session_id: "session-main" })).toEqual({
         type: "text",
         value: "SP: sp-implementer T1 running/busy - bash running",

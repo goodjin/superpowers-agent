@@ -17,6 +17,16 @@ import {
 import { buildProgressPanelViewModel, renderCompactProgressText, renderProgressPanelText } from "./tui/progress-panel"
 import type { WorkflowState } from "./state/types"
 
+export const RESIDENT_PROGRESS_SLOT_NAMES = [
+  "session_prompt_right",
+  "sidebar_footer",
+  "sidebar_content",
+  "home_bottom",
+  "app_bottom",
+  "home_footer",
+  "home_prompt_right",
+] as const
+
 type TuiApi = {
   route: {
     register(routes: Array<{ name: string; render(input?: { params?: Record<string, unknown> }): unknown }>): () => void
@@ -66,10 +76,7 @@ export function createTuiPluginModule() {
         },
       ]))
       api.slots?.register({
-        slots: {
-          session_prompt_right: createCompactProgressSlot(api, createTextElement, { questionClient }),
-          sidebar_footer: createCompactProgressSlot(api, createTextElement, { questionClient }),
-        },
+        slots: residentProgressSlots(createCompactProgressSlot(api, createTextElement, { questionClient })),
       })
       if (api.command) {
         disposers.push(api.command.register(() => [
@@ -94,6 +101,10 @@ export function createTuiPluginModule() {
       })
     },
   }
+}
+
+function residentProgressSlots(slot: (_context?: unknown, props?: Record<string, unknown>) => unknown): Record<string, (_context?: unknown, props?: Record<string, unknown>) => unknown> {
+  return Object.fromEntries(RESIDENT_PROGRESS_SLOT_NAMES.map((name) => [name, slot]))
 }
 
 type TextSource = string | Accessor<string>

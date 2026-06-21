@@ -70,6 +70,7 @@ describe("progress panel view model", () => {
       {
         "session-child": "busy",
       },
+      new Date("2026-06-19T00:01:05.000Z"),
     )
 
     expect(model).toMatchObject({
@@ -83,6 +84,7 @@ describe("progress panel view model", () => {
           agent: "sp-implementer",
           phase: "implement",
           durable_status: "running",
+          activity_status: "active",
           session_id: "session-child",
           live_status: "busy",
           latest_summary: "bash running",
@@ -95,5 +97,59 @@ describe("progress panel view model", () => {
     expect(text).toContain("001-implement-T1")
     expect(text).toContain("bash running")
     expect(renderCompactProgressText(model)).toBe("SP: sp-implementer T1 running/busy - bash running")
+  })
+
+  test("marks stale running child progress as stalled", () => {
+    const state: WorkflowState = {
+      id: "run-1",
+      project: "/repo",
+      session: "session-main",
+      parent_session_id: "session-main",
+      activation: "active",
+      workflow: "feature",
+      entrypoint: "execute",
+      limited_context: true,
+      mode: "execute",
+      phase: "implement",
+      current_phase: "implement",
+      status: "running",
+      goal: "Implement feature",
+      created_at: "2026-06-19T00:00:00.000Z",
+      updated_at: "2026-06-19T00:00:00.000Z",
+      gates: {},
+      artifacts: {},
+      node_runs: [
+        {
+          id: "030-spec-review",
+          phase: "spec-review",
+          agent: "sp-spec-reviewer",
+          session_id: "session-review",
+          status: "running",
+          attempts: 1,
+          started_at: "2026-06-19T00:00:00.000Z",
+        },
+      ],
+      history: [{ at: "2026-06-19T00:00:00.000Z", event: "created", to: "feature" }],
+    }
+    const latest: NodeProgressEntry = {
+      at: "2026-06-19T00:00:20.000Z",
+      kind: "tool_pending",
+      session_id: "session-review",
+      node_id: "030-spec-review",
+      agent: "sp-spec-reviewer",
+      phase: "spec-review",
+      summary: "write pending",
+    }
+
+    const model = buildProgressPanelViewModel(
+      state,
+      { "030-spec-review": [latest] },
+      { "session-review": "busy" },
+      new Date("2026-06-19T00:01:00.000Z"),
+    )
+
+    expect(model.rows[0]?.activity_status).toBe("stalled")
+    expect(renderProgressPanelText(model)).toContain("status: running / busy / stalled")
+    expect(renderCompactProgressText(model)).toBe("SP: sp-spec-reviewer running/busy/stalled - write pending")
   })
 })
