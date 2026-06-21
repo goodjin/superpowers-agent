@@ -17,9 +17,10 @@
 
 ## 修复方案
 
-- 将常驻 progress slot 收敛为 `sidebar_footer`, `sidebar_content`, `home_bottom`, `app_bottom`。
-- 从 TUI 注册名单中移除 `session_prompt_right`, `home_prompt_right`, `home_footer`。
-- 更新 TUI 单元测试，断言 prompt-adjacent slot 不再注册。
+- 将常驻 progress 主承载收敛为 `sidebar_footer`, `sidebar_content`, `home_bottom`, `app_bottom`。
+- 保留 `session_prompt_right` 作为短 fallback indicator，限制为 44 字符，避免当前 host layout 不渲染 bottom/sidebar 时完全看不到进度。
+- 从 TUI 注册名单中移除 `home_prompt_right`, `home_footer`。
+- 更新 TUI 单元测试，断言 `home_prompt_right` 不注册，且 `session_prompt_right` fallback 被截短。
 - 更新 progress 模块文档，明确主会话底部和右侧栏是常驻进度承载区。
 
 ## 验证步骤

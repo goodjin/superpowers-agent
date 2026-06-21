@@ -97,6 +97,7 @@ describe("progress panel view model", () => {
     expect(text).toContain("001-implement-T1")
     expect(text).toContain("bash running")
     expect(renderCompactProgressText(model)).toBe("SP: sp-implementer T1 running/busy - bash running")
+    expect(renderCompactProgressText(model, 44)).toBe("SP: sp-implementer T1 running/busy - bash...")
   })
 
   test("marks stale running child progress as stalled", () => {

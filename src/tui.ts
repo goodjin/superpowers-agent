@@ -22,7 +22,10 @@ export const RESIDENT_PROGRESS_SLOT_NAMES = [
   "sidebar_content",
   "home_bottom",
   "app_bottom",
+  "session_prompt_right",
 ] as const
+
+const PROMPT_FALLBACK_PROGRESS_SLOT_NAMES = new Set<string>(["session_prompt_right"])
 
 type TuiApi = {
   route: {
@@ -73,7 +76,12 @@ export function createTuiPluginModule() {
         },
       ]))
       api.slots?.register({
-        slots: residentProgressSlots(createCompactProgressSlot(api, createTextElement, { questionClient })),
+        slots: residentProgressSlots((slotName) =>
+          createCompactProgressSlot(api, createTextElement, {
+            questionClient,
+            maxChars: PROMPT_FALLBACK_PROGRESS_SLOT_NAMES.has(slotName) ? 44 : 120,
+          }),
+        ),
       })
       if (api.command) {
         disposers.push(api.command.register(() => [
@@ -100,8 +108,10 @@ export function createTuiPluginModule() {
   }
 }
 
-function residentProgressSlots(slot: (_context?: unknown, props?: Record<string, unknown>) => unknown): Record<string, (_context?: unknown, props?: Record<string, unknown>) => unknown> {
-  return Object.fromEntries(RESIDENT_PROGRESS_SLOT_NAMES.map((name) => [name, slot]))
+function residentProgressSlots(
+  slotForName: (slotName: string) => (_context?: unknown, props?: Record<string, unknown>) => unknown,
+): Record<string, (_context?: unknown, props?: Record<string, unknown>) => unknown> {
+  return Object.fromEntries(RESIDENT_PROGRESS_SLOT_NAMES.map((name) => [name, slotForName(name)]))
 }
 
 type TextSource = string | Accessor<string>
@@ -109,6 +119,7 @@ type TextSource = string | Accessor<string>
 type CompactProgressSlotOptions = {
   refreshMs?: number
   questionClient?: QuestionBridgeClient
+  maxChars?: number
 }
 
 export function createCompactProgressSlot(
@@ -120,14 +131,14 @@ export function createCompactProgressSlot(
     const sessionID = slotSessionID(props)
     const refreshMs = options.refreshMs ?? 1000
     if (refreshMs <= 0) {
-      const text = safeCompactProgressText(api, sessionID)
+      const text = safeCompactProgressText(api, sessionID, options.maxChars)
       return text ? renderText(text) : null
     }
-    const [text, setText] = createSignal(safeCompactProgressText(api, sessionID))
+    const [text, setText] = createSignal(safeCompactProgressText(api, sessionID, options.maxChars))
     const timer = setInterval(() => {
-      void refreshCompactProgressText(api, sessionID, options.questionClient, setText)
+      void refreshCompactProgressText(api, sessionID, options.questionClient, options.maxChars, setText)
     }, refreshMs)
-    void refreshCompactProgressText(api, sessionID, options.questionClient, setText)
+    void refreshCompactProgressText(api, sessionID, options.questionClient, options.maxChars, setText)
     onCleanup(() => clearInterval(timer))
     return renderText(text)
   }
@@ -137,11 +148,11 @@ function slotSessionID(props?: Record<string, unknown>): unknown {
   return typeof props?.session_id === "string" ? props.session_id : props?.sessionID
 }
 
-function safeCompactProgressText(api: TuiApi, sessionID?: unknown): string {
+function safeCompactProgressText(api: TuiApi, sessionID?: unknown, maxChars?: number): string {
   try {
     const state = currentWorkflowState(api)
     const progress = state ? createNodeProgressStore(api.state.path.directory).readRun(state) : {}
-    return renderCompactProgressText(progressModel(api, state, progress, sessionID))
+    return renderCompactProgressText(progressModel(api, state, progress, sessionID), maxChars)
   } catch {
     return "SP: progress unavailable"
   }
@@ -151,19 +162,20 @@ async function refreshCompactProgressText(
   api: TuiApi,
   sessionID: unknown,
   client: QuestionBridgeClient | undefined,
+  maxChars: number | undefined,
   setText: (value: string) => void,
 ): Promise<void> {
   try {
     if (!client) {
-      setText(safeCompactProgressText(api, sessionID))
+      setText(safeCompactProgressText(api, sessionID, maxChars))
       return
     }
     const state = currentWorkflowState(api)
     const questions = filterWorkflowQuestionRequests(state, await client.list(api.state.path.directory))
     const questionText = renderCompactQuestionText(questions)
-    setText(questionText || safeCompactProgressText(api, sessionID))
+    setText(questionText || safeCompactProgressText(api, sessionID, maxChars))
   } catch {
-    setText(safeCompactProgressText(api, sessionID))
+    setText(safeCompactProgressText(api, sessionID, maxChars))
   }
 }
 

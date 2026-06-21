@@ -83,7 +83,7 @@ export function renderProgressPanelText(model: ProgressPanelViewModel): string {
   return lines.join("\n").trimEnd()
 }
 
-export function renderCompactProgressText(model: ProgressPanelViewModel): string {
+export function renderCompactProgressText(model: ProgressPanelViewModel, max = 120): string {
   if (!model.active) return ""
   const row = [...model.rows].reverse().find((candidate) => candidate.durable_status === "running") ?? model.rows.at(-1)
   if (!row) return "SP: active workflow has no child sessions"
@@ -91,7 +91,7 @@ export function renderCompactProgressText(model: ProgressPanelViewModel): string
   const task = row.task_id ? ` ${row.task_id}` : ""
   const live = row.live_status === "unknown" ? row.durable_status : `${row.durable_status}/${row.live_status}`
   const activity = row.activity_status === "stalled" ? "/stalled" : ""
-  return truncateLine(`SP: ${row.agent}${task} ${live}${activity} - ${row.latest_summary}`)
+  return truncateLine(`SP: ${row.agent}${task} ${live}${activity} - ${row.latest_summary}`, max)
 }
 
 function truncateLine(value: string, max = 120): string {
