@@ -12,10 +12,10 @@
 - `test/support/opencode-e2e/logging.ts`：e2e 场景日志 helper，统一输出 suite goal、scenario description、step、verification 和 summary。
 - `test/support/opencode-e2e/harness.test.ts`：harness smoke，以及 `node_runs` / `nodes/*` 读取能力验证。
 - `test/controller-intake.test.ts`：proposal 生成、resume proposal、`sp_prepare` 创建 prepared run、`sp_start` 激活 prepared run 或直接创建 run。
-- `test/dispatch-transition.test.ts`：intake、plan、implementation、串行 review、retry 和 needs_user 的 dispatch decision。
+- `test/dispatch-transition.test.ts`：intake、plan、task-scoped implementation acceptance、串行 review、code-review 后回到 task graph、retry 和 needs_user 的 dispatch decision。
 - `test/session-orchestrator.test.ts`：node task markdown 模板、session create/reuse adapter 调用。
 - `test/store-node-runs.test.ts`：`node_runs` 创建、`nodes/*/task.md`、`nodes/*/record.json` 和完成状态更新。
-- `test/sp-record-dispatch.test.ts`：legacy record handler 覆盖，验证 `sp_report(plan)` 语义后 dispatch implementer，并在 `needs_user` 时不派发。
+- `test/sp-record-dispatch.test.ts`：legacy record handler 覆盖，验证 `sp_report(plan)` 语义后 dispatch implementer、implementation report 后派发带 task/report 上下文的 acceptance，并在 `needs_user` 时不派发。
 - `test/node-progress.test.ts`：child session 事件到节点 progress JSONL 的映射、忽略无关 session、错误摘要。
 - `test/progress-panel.test.ts`：TUI progress panel view-model 和文本渲染。
 - `test/plugin-progress-event.test.ts`：server plugin `event` hook 写入 child progress。

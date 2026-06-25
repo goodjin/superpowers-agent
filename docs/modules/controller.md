@@ -25,6 +25,13 @@ controller 模块负责把用户确认后的任务整理成可准备、可启动
 6. 节点会话完成或需要追加中间结果时调用 `sp_report`。
 7. runtime 根据 transition 规则派发后续节点，直到 finish、waiting_user、blocked、failed 或 canceled。
 
+Feature implementation task 的检查链是 task-scoped：
+
+- `implementation` passed 后派发同一 `task_id` 的 `sp-acceptance-reviewer`。
+- `acceptance` passed 后派发同一 `task_id` 的 `sp-verifier`。
+- `verification` passed 后派发同一 `task_id` 的 `sp-code-reviewer`。
+- `code-review` passed 后重新计算 task graph runnable tasks；如果还有依赖已满足的 task，继续派发 implementer，否则进入 finish。
+
 ## Notes
 
 - public tool surface 只包含 `sp_status`、`sp_prepare`、`sp_start`、`sp_cancel`、`sp_report`。

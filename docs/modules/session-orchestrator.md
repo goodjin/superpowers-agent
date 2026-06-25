@@ -33,6 +33,17 @@ store 随后用这些信息创建 `node_runs`，并写入 `nodes/<node-id>/task.
 
 当 decision 是 `create_session` 时，orchestrator 还支持 `onSessionCreated` 回调。工具层会在这个回调里先注册 `node_runs`，再继续发送首条 child prompt。这样 child session 即使立刻调用 `sp_report`，state store 里也已经有对应节点，不会出现 report 先到、node_run 还没落盘的竞态。
 
+## Prompt Context
+
+`buildNodeTaskPacket()` 会把 transition decision 转成可审计的 prompt packet。除 objective 和 required artifacts 外，packet 可以携带 `context_sections`：
+
+- 有 `task_id` 的节点会包含 `Task Scope`，内容来自 `state.task_graph.tasks[]` 的同 id task。
+- `acceptance` 节点会包含 `Implementation Completion Summary`，内容来自触发派发的 implementation `sp_report.summary` 和 `artifacts.patch_summary`。
+- `acceptance` 节点还会包含 `Acceptance Instructions`，明确 reviewer 只检查当前 task，不因其他 task graph 项未完成而失败。
+- retry 复用 implementer session 时，prompt 会包含失败检查的 `Retry Context`。
+
+Acceptance 的 required artifacts 会指向 `spec.md`、`plan.md`、`tasks.json`、`reports/<task-id>/task.md` 和 `reports/<task-id>/report.md`。这些路径用于 reviewer 读取完整上下文，内联 summary 用于让检查范围在首屏 prompt 中也足够清楚。
+
 ## Progress Behavior
 
 orchestrator 在每次 dispatch 时发送两类 progress：

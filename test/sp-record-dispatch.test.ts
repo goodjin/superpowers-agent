@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test"
 import { mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { buildNodeTaskPrompt } from "../src/session/templates"
 import { createProjectStore } from "../src/state/store"
 import { createReportHandler } from "../src/tools/report-handler"
 
@@ -125,6 +126,106 @@ describe("sp_report dispatch integration", () => {
           message: "Node requested user input.",
         },
       ])
+    } finally {
+      rmSync(project, { recursive: true, force: true })
+    }
+  })
+
+  test("implementation report dispatches task-scoped acceptance with task and report context", async () => {
+    const project = mkdtempSync(join(tmpdir(), "sp-record-acceptance-"))
+    try {
+      const store = createProjectStore(project)
+      store.startRun({
+        workflow: "feature",
+        entrypoint: "feature",
+        goal: "Add gates",
+        request: "# Request",
+        proposal: "# Proposal",
+        parentSessionID: "session-main",
+      })
+      store.record({
+        event: "plan",
+        status: "passed",
+        summary: "Plan ready.",
+        artifacts: { plan: "# Plan" },
+        gates: { plan_written: true },
+        task_graph: {
+          tasks: [
+            {
+              id: "T1",
+              title: "Types",
+              summary: "Add workflow state types.",
+              depends_on: [],
+              files: ["src/state/types.ts"],
+              test_commands: ["bun test test/state.test.ts"],
+            },
+            {
+              id: "T2",
+              title: "Store",
+              summary: "Persist workflow state.",
+              depends_on: ["T1"],
+              files: ["src/state/store.ts"],
+            },
+          ],
+        },
+      })
+      store.addNodeRun({
+        phase: "implement",
+        agent: "sp-implementer",
+        primary_skill: "superpowers-test-driven-development",
+        session_id: "session-impl",
+        task_id: "T1",
+        task_markdown: "# Task\n\nImplement T1.",
+      })
+
+      const prompts: string[] = []
+      const handler = createReportHandler({
+        store,
+        orchestrator: {
+          async dispatch(args) {
+            const taskMarkdown = buildNodeTaskPrompt(args.packet)
+            prompts.push(taskMarkdown)
+            return {
+              action: args.decision.action,
+              session_id: "session-acceptance",
+              task_markdown: taskMarkdown,
+            }
+          },
+        },
+      })
+
+      const output = await handler(
+        {
+          event: "implementation",
+          status: "passed",
+          summary: "Implemented workflow state types.",
+          artifacts: { patch_summary: "Changed src/state/types.ts and added type coverage." },
+          gates: { implementation_done: true },
+        },
+        { sessionID: "session-impl", agent: "sp-implementer" },
+      )
+
+      const result = JSON.parse(output)
+      const acceptance = result.dispatches[0]
+      expect(acceptance).toMatchObject({
+        agent: "sp-acceptance-reviewer",
+        phase: "acceptance",
+        task_id: "T1",
+        session_id: "session-acceptance",
+      })
+      expect(prompts[0]).toContain("## Task Scope")
+      expect(prompts[0]).toContain("Task ID: T1")
+      expect(prompts[0]).toContain("Title: Types")
+      expect(prompts[0]).toContain("Add workflow state types.")
+      expect(prompts[0]).toContain("src/state/types.ts")
+      expect(prompts[0]).toContain("bun test test/state.test.ts")
+      expect(prompts[0]).toContain("## Implementation Completion Summary")
+      expect(prompts[0]).toContain("Implemented workflow state types.")
+      expect(prompts[0]).toContain("Changed src/state/types.ts and added type coverage.")
+      expect(prompts[0]).toContain("Do not fail this task because other task graph items are not implemented yet.")
+      expect(prompts[0]).toContain("reports/T1/report.md")
+      expect(store.readCurrent()?.node_runs.at(-1)?.task_id).toBe("T1")
+      expect(store.readCurrent()?.node_runs.at(-1)?.phase).toBe("acceptance")
     } finally {
       rmSync(project, { recursive: true, force: true })
     }

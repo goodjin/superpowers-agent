@@ -58,14 +58,53 @@ describe("decideNextDispatches", () => {
       gates: { implementation_done: true },
     }
 
-    const decisions = decideNextDispatches(state(), record)
+    const decisions = decideNextDispatches(
+      state({
+        node_runs: [
+          {
+            id: "003-implement-T1",
+            task_id: "T1",
+            phase: "implement",
+            agent: "sp-implementer",
+            session_id: "session-impl",
+            status: "passed",
+            attempts: 1,
+            started_at: "2026-06-14T00:00:00.000Z",
+          },
+        ],
+      }),
+      record,
+    )
 
     expect(decisions).toHaveLength(1)
-    expect(decisions[0]).toMatchObject({ agent: "sp-acceptance-reviewer", phase: "acceptance" })
+    expect(decisions[0]).toMatchObject({
+      agent: "sp-acceptance-reviewer",
+      phase: "acceptance",
+      task_id: "T1",
+      review_context: {
+        source_event: "implementation",
+        summary: "Implemented.",
+        report: "Patch summary.",
+      },
+    })
   })
 
-  test("review transitions are serial", () => {
-    const acceptance = decideNextDispatches(state({ current_phase: "acceptance" }), {
+  test("review transitions keep the same task id", () => {
+    const acceptance = decideNextDispatches(state({
+      current_phase: "acceptance",
+      node_runs: [
+        {
+          id: "004-acceptance-T1",
+          task_id: "T1",
+          phase: "acceptance",
+          agent: "sp-acceptance-reviewer",
+          session_id: "session-acceptance",
+          status: "passed",
+          attempts: 1,
+          started_at: "2026-06-14T00:00:00.000Z",
+        },
+      ],
+    }), {
       event: "acceptance",
       status: "passed",
       summary: "Acceptance passed.",
@@ -74,9 +113,23 @@ describe("decideNextDispatches", () => {
     })
 
     expect(acceptance).toHaveLength(1)
-    expect(acceptance[0]).toMatchObject({ agent: "sp-verifier" })
+    expect(acceptance[0]).toMatchObject({ agent: "sp-verifier", task_id: "T1" })
 
-    const verification = decideNextDispatches(state({ current_phase: "verification" }), {
+    const verification = decideNextDispatches(state({
+      current_phase: "verification",
+      node_runs: [
+        {
+          id: "005-verification-T1",
+          task_id: "T1",
+          phase: "verification",
+          agent: "sp-verifier",
+          session_id: "session-verification",
+          status: "passed",
+          attempts: 1,
+          started_at: "2026-06-14T00:00:00.000Z",
+        },
+      ],
+    }), {
       event: "verification",
       status: "passed",
       summary: "Verification passed.",
@@ -85,7 +138,7 @@ describe("decideNextDispatches", () => {
     })
 
     expect(verification).toHaveLength(1)
-    expect(verification[0]).toMatchObject({ agent: "sp-code-reviewer" })
+    expect(verification[0]).toMatchObject({ agent: "sp-code-reviewer", task_id: "T1" })
   })
 
   test("plan passed dispatches all runnable implementer tasks", () => {
@@ -129,6 +182,51 @@ describe("decideNextDispatches", () => {
     )
 
     expect(decisions).toEqual([{ action: "finish", reason: "plan-only workflow complete" }])
+  })
+
+  test("code review passed returns to task graph dispatch before finishing", () => {
+    const decisions = decideNextDispatches(
+      state({
+        task_graph: {
+          tasks: [
+            { id: "T1", title: "Types", summary: "Add types", depends_on: [] },
+            { id: "T2", title: "Store", summary: "Add store", depends_on: ["T1"] },
+          ],
+        },
+        node_runs: [
+          {
+            id: "003-implement-T1",
+            task_id: "T1",
+            phase: "implement",
+            agent: "sp-implementer",
+            session_id: "session-impl",
+            status: "passed",
+            attempts: 1,
+            started_at: "2026-06-14T00:00:00.000Z",
+          },
+          {
+            id: "006-code-review-T1",
+            task_id: "T1",
+            phase: "code-review",
+            agent: "sp-code-reviewer",
+            session_id: "session-review",
+            status: "passed",
+            attempts: 1,
+            started_at: "2026-06-14T00:00:00.000Z",
+          },
+        ],
+      }),
+      {
+        event: "code-review",
+        status: "passed",
+        summary: "Code review passed.",
+        artifacts: { code_review: "No issues." },
+        gates: { code_review_passed: true },
+      },
+    )
+
+    expect(decisions).toHaveLength(1)
+    expect(decisions[0]).toMatchObject({ agent: "sp-implementer", phase: "implement", task_id: "T2" })
   })
 
   test("investigation passed dispatches finisher", () => {

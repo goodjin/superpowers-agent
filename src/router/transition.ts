@@ -9,6 +9,7 @@ export type DispatchDecision =
       agent: NodeAgentName
       primary_skill: string
       task_id?: string
+      review_context?: ReviewContext
       reason: string
     }
   | {
@@ -18,6 +19,7 @@ export type DispatchDecision =
       primary_skill: string
       session_id: string
       task_id?: string
+      review_context?: ReviewContext
       reason: string
     }
   | {
@@ -32,6 +34,12 @@ export type DispatchDecision =
       action: "blocked"
       reason: string
     }
+
+export type ReviewContext = {
+  source_event: SpRecordInput["event"]
+  summary: string
+  report?: string
+}
 
 export function decideNextDispatches(state: WorkflowState, record?: SpRecordInput): DispatchDecision[] {
   if (!record) return decideFromState(state)
@@ -58,13 +66,23 @@ export function decideNextDispatches(state: WorkflowState, record?: SpRecordInpu
       }
       return planDispatches(state, record)
     case "implementation":
-      if (state.node_runs.some((run) => run.agent === "sp-implementer" && run.status === "running")) return []
-      return [create("acceptance", "sp-acceptance-reviewer", "implementation passed")]
+      return [
+        create("acceptance", "sp-acceptance-reviewer", "implementation passed", latestTaskID(state, "implement"), {
+          source_event: record.event,
+          summary: record.summary,
+          report: record.artifacts?.patch_summary,
+        }),
+      ]
     case "acceptance":
-      return [create("verification", "sp-verifier", "acceptance passed")]
+      return [create("verification", "sp-verifier", "acceptance passed", latestTaskID(state, "acceptance"))]
     case "verification":
-      return [create("code-review", "sp-code-reviewer", "verification passed")]
+      return [create("code-review", "sp-code-reviewer", "verification passed", latestTaskID(state, "verification"))]
     case "code-review":
+      if (state.task_graph?.tasks.length) {
+        const runnable = planDispatches(state, record)
+        if (runnable.length > 0) return runnable
+        if (!allGraphTasksCodeReviewed(state) || hasRunningNodeRuns(state)) return []
+      }
       return [create("finish", "sp-finisher", "code review passed")]
     case "finish":
       return [{ action: "finish", reason: "finish record passed" }]
@@ -113,7 +131,10 @@ function failedRecordDispatches(state: WorkflowState, record: SpRecordInput): Di
     return [{ action: "blocked", reason: record.summary }]
   }
 
-  const lastImplementer = [...state.node_runs].reverse().find((run) => run.agent === "sp-implementer")
+  const failedTaskID = latestTaskID(state, phaseForEvent(record.event))
+  const lastImplementer = [...state.node_runs]
+    .reverse()
+    .find((run) => run.agent === "sp-implementer" && (!failedTaskID || run.task_id === failedTaskID))
   if (lastImplementer) {
     return [
       {
@@ -123,6 +144,11 @@ function failedRecordDispatches(state: WorkflowState, record: SpRecordInput): Di
         primary_skill: AGENT_SKILL_MAP["sp-implementer"],
         session_id: lastImplementer.session_id,
         task_id: lastImplementer.task_id,
+        review_context: {
+          source_event: record.event,
+          summary: record.summary,
+          report: record.findings ?? record.checks ?? record.artifacts?.acceptance ?? record.artifacts?.code_review ?? record.artifacts?.verification_log,
+        },
         reason: `${record.event} failed; retry implementation`,
       },
     ]
@@ -130,13 +156,43 @@ function failedRecordDispatches(state: WorkflowState, record: SpRecordInput): Di
   return [create("implement", "sp-implementer", `${record.event} failed; create retry implementer`)]
 }
 
-function create(phase: string, agent: NodeAgentName, reason: string, taskID?: string): DispatchDecision {
+function create(phase: string, agent: NodeAgentName, reason: string, taskID?: string, reviewContext?: ReviewContext): DispatchDecision {
   return {
     action: "create_session",
     phase,
     agent,
     primary_skill: AGENT_SKILL_MAP[agent],
     task_id: taskID,
+    review_context: reviewContext,
     reason,
   }
+}
+
+function latestTaskID(state: WorkflowState, phase: string): string | undefined {
+  return [...state.node_runs].reverse().find((run) => run.phase === phase && run.task_id)?.task_id
+}
+
+function phaseForEvent(event: SpRecordInput["event"]): string {
+  switch (event) {
+    case "implementation":
+      return "implement"
+    case "code-review":
+      return "code-review"
+    default:
+      return event
+  }
+}
+
+function hasRunningNodeRuns(state: WorkflowState): boolean {
+  return state.node_runs.some((run) => run.status === "running")
+}
+
+function allGraphTasksCodeReviewed(state: WorkflowState): boolean {
+  if (!state.task_graph?.tasks.length) return true
+  const reviewed = new Set(
+    state.node_runs
+      .filter((run) => run.task_id && run.phase === "code-review" && run.status === "passed")
+      .map((run) => run.task_id as string),
+  )
+  return state.task_graph.tasks.every((task) => reviewed.has(task.id))
 }
