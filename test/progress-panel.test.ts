@@ -4,7 +4,6 @@ import {
   renderCompactProgressText,
   renderProgressPanelText,
   renderRunningSessionsText,
-  renderUnfinishedTasksText,
   renderWorkflowStatusText,
 } from "../src/tui/progress-panel"
 import type { NodeProgressEntry } from "../src/progress/node-progress"
@@ -139,7 +138,6 @@ describe("progress panel view model", () => {
     expect(renderCompactProgressText(model, 44)).toBe("SP: sp-implementer T1 running/busy - bash...")
     expect(renderWorkflowStatusText(model)).toBe("SP: feature running@implement | tasks 0/2 done | sessions 1 running")
     expect(renderRunningSessionsText(model)).toContain("sp-implementer T1: busy - bash running")
-    expect(renderUnfinishedTasksText(model)).toContain("T2: pending - Document progress surface")
   })
 
   test("marks stale running child progress as stalled", () => {

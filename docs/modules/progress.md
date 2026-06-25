@@ -68,12 +68,11 @@ child question bridge route 名为 `superpowers-questions`，命令值为 `super
 
 主会话常驻进度通过 TUI slot 展示。不同 slot 不再复用同一条 compact 文本，而是按可用空间分工：
 
-- `app_bottom`：主会话底部常驻 surface，承载整体 workflow 状态，例如 workflow/status/current phase、任务完成数、运行中 session 数。
-- `home_bottom`：首页底部 surface，承载同一类整体 workflow 状态。
-- `sidebar_content`：右侧栏主体。没有 session props 时按首页场景展示未完成任务；有 parent/child session props 时按主会话场景展示运行中的 child session 列表。
-- `sidebar_footer`：右侧栏底部降级 surface，承载整体 workflow 状态。
+- `app_bottom`：主会话底部常驻 surface，承载整体 workflow 状态，例如 workflow/status/current phase、任务完成数、运行中 session 数。没有 session props 时不渲染。
+- `sidebar_content`：右侧栏主体。只在有 parent/child session props 时按主会话场景展示运行中的 child session 列表；首页/no-session 场景不渲染。
+- `sidebar_footer`：右侧栏底部降级 surface，承载整体 workflow 状态。没有 session props 时不渲染。
 - `session_prompt_right`：短 fallback indicator，限制为 44 字符，避免主会话没有任何可见 progress 锚点。完整内容不放在输入区。
-- `home_prompt_right`、`home_footer`：不注册 Superpowers compact progress。`home_prompt_right` 会靠近输入区，`home_footer` 与 host footer 区域语义不稳定，先交给主会话底部、sidebar surface 和短 fallback 承载。
+- `home_bottom`、`home_prompt_right`、`home_footer`：不注册 Superpowers resident progress。首页不展示插件相关内容，避免在没有稳定区域时挤占或污染首页布局。
 
 当前没有在本机 OpenCode TUI 包中确认到可用的主会话内容区 slot 名称，所以进行中会话的详细过程仍通过 `superpowers-progress` route 查看；待 host 暴露明确的 session content slot 后，再把详细过程挂到该 surface。`session_prompt_right` fallback 会截短，只做可见锚点。
 
@@ -81,7 +80,7 @@ running node 的最新 progress 如果超过显示阈值没有更新，会在 co
 
 slot render 必须返回 OpenTUI/Solid element，而不是裸字符串。TUI 入口会加载 `@opentui/solid/runtime-plugin-support`，再使用 `@opentui/solid` 创建 `text` element，并对 workflow/progress 读取异常做 fail-closed 处理；读取失败时只显示 `SP: progress unavailable`，避免异常进入 host TUI 渲染器。
 
-常驻 slot 不能依赖父会话消息流触发刷新。child session 写入 `progress.jsonl` 时，parent session 的 `time_updated` 可能不变，因此 compact surface 需要自己定时重读 workflow/progress。slot 没有传入 session props 时展示当前 active workflow；传入 session props 时，只在当前 session 属于 active workflow 时展示，包括 parent session 和 `node_runs[].session_id` 中登记过的 child session；无关 session 继续隐藏。
+常驻 slot 不能依赖父会话消息流触发刷新。child session 写入 `progress.jsonl` 时，parent session 的 `time_updated` 可能不变，因此 compact surface 需要自己定时重读 workflow/progress。非 compact resident slot 必须传入 session props，且只在当前 session 属于 active workflow 时展示，包括 parent session 和 `node_runs[].session_id` 中登记过的 child session；无 session props 的首页场景和无关 session 继续隐藏。
 
 当 OpenCode pending question API 返回 child session question 时，compact slot 优先显示问题摘要，例如 `SP Q: Finish action - ...`；没有 pending question 时再显示普通 child progress。问题正文、选项和确认/取消动作在 `superpowers-questions` route 中完成，避免把交互塞进一行状态文本。
 

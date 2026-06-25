@@ -19,7 +19,6 @@ import {
   renderCompactProgressText,
   renderProgressPanelText,
   renderRunningSessionsText,
-  renderUnfinishedTasksText,
   renderWorkflowStatusText,
 } from "./tui/progress-panel"
 import type { WorkflowState } from "./state/types"
@@ -27,12 +26,11 @@ import type { WorkflowState } from "./state/types"
 export const RESIDENT_PROGRESS_SLOT_NAMES = [
   "sidebar_footer",
   "sidebar_content",
-  "home_bottom",
   "app_bottom",
   "session_prompt_right",
 ] as const
 
-type ProgressSlotRenderer = "compact" | "workflow-status" | "sidebar-context"
+type ProgressSlotRenderer = "compact" | "workflow-status" | "running-sessions"
 
 type TuiApi = {
   route: {
@@ -163,11 +161,10 @@ export function createProgressSlot(
 function progressSlotOptions(slotName: string): Pick<CompactProgressSlotOptions, "renderer" | "maxChars"> {
   switch (slotName) {
     case "app_bottom":
-    case "home_bottom":
     case "sidebar_footer":
       return { renderer: "workflow-status", maxChars: 100 }
     case "sidebar_content":
-      return { renderer: "sidebar-context" }
+      return { renderer: "running-sessions" }
     case "session_prompt_right":
       return { renderer: "compact", maxChars: 44 }
     default:
@@ -190,10 +187,9 @@ function safeProgressSlotText(
     const state = currentWorkflowState(api)
     const progress = state ? createNodeProgressStore(api.state.path.directory).readRun(state) : {}
     const model = progressModel(api, state, progress, sessionID)
+    if (renderer !== "compact" && typeof slotSessionID(props) !== "string") return ""
     if (renderer === "workflow-status") return renderWorkflowStatusText(model, maxChars)
-    if (renderer === "sidebar-context") {
-      return typeof slotSessionID(props) === "string" ? renderRunningSessionsText(model) : renderUnfinishedTasksText(model)
-    }
+    if (renderer === "running-sessions") return renderRunningSessionsText(model)
     return renderCompactProgressText(model, maxChars)
   } catch {
     return "SP: progress unavailable"

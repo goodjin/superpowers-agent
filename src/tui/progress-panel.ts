@@ -137,17 +137,6 @@ export function renderRunningSessionsText(model: ProgressPanelViewModel, maxRows
   ].filter(Boolean).join("\n")
 }
 
-export function renderUnfinishedTasksText(model: ProgressPanelViewModel, maxRows = 8): string {
-  if (!model.active) return ""
-  const unfinished = model.tasks.filter((task) => task.status !== "passed")
-  if (unfinished.length === 0) return "SP unfinished tasks\nnone"
-  return [
-    "SP unfinished tasks",
-    ...unfinished.slice(0, maxRows).map((task) => `${task.task_id}: ${task.status} - ${task.title}`),
-    unfinished.length > maxRows ? `+${unfinished.length - maxRows} more` : "",
-  ].filter(Boolean).join("\n")
-}
-
 function truncateLine(value: string, max = 120): string {
   return value.length > max ? `${value.slice(0, max - 3)}...` : value
 }

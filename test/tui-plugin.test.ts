@@ -87,7 +87,7 @@ describe("Superpowers TUI plugin", () => {
       expect(Object.keys(slots).sort()).toEqual([...RESIDENT_PROGRESS_SLOT_NAMES].sort())
       expect(typeof slots.sidebar_footer).toBe("function")
       expect(typeof slots.sidebar_content).toBe("function")
-      expect(typeof slots.home_bottom).toBe("function")
+      expect(slots.home_bottom).toBeUndefined()
       expect(typeof slots.app_bottom).toBe("function")
       expect(typeof slots.session_prompt_right).toBe("function")
       expect(slots.home_prompt_right).toBeUndefined()
@@ -96,19 +96,17 @@ describe("Superpowers TUI plugin", () => {
         (value) => ({ type: "text", value: typeof value === "function" ? value() : value }),
         { refreshMs: 0, renderer: "workflow-status" },
       )
-      expect(workflowStatusSlot()).toEqual({
+      expect(workflowStatusSlot()).toBeNull()
+      expect(workflowStatusSlot(undefined, { session_id: "session-main" })).toEqual({
         type: "text",
         value: "SP: feature intake@intake | tasks 0/1 done | sessions 1 running",
       })
       const sidebarSlot = createProgressSlot(
         api,
         (value) => ({ type: "text", value: typeof value === "function" ? value() : value }),
-        { refreshMs: 0, renderer: "sidebar-context" },
+        { refreshMs: 0, renderer: "running-sessions" },
       )
-      expect(sidebarSlot()).toEqual({
-        type: "text",
-        value: "SP unfinished tasks\nT1: running - T1",
-      })
+      expect(sidebarSlot()).toBeNull()
       expect(sidebarSlot(undefined, { session_id: "session-main" })).toEqual({
         type: "text",
         value: "SP running sessions\nsp-implementer T1: busy - bash running",
