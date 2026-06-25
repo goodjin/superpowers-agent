@@ -3,9 +3,9 @@ import { mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { createProjectStore } from "../src/state/store"
-import { createRecordHandler } from "../src/tools/sp-record"
+import { createReportHandler } from "../src/tools/report-handler"
 
-describe("sp_record dispatch integration", () => {
+describe("sp_report dispatch integration", () => {
   test("plan passed with runnable tasks dispatches implementer sessions and records node_runs", async () => {
     const project = mkdtempSync(join(tmpdir(), "sp-record-dispatch-"))
     try {
@@ -21,7 +21,7 @@ describe("sp_record dispatch integration", () => {
 
       const dispatched: string[] = []
       const progress: Array<{ stage: string; message: string }> = []
-      const handler = createRecordHandler({
+      const handler = createReportHandler({
         store,
         orchestrator: {
           async dispatch(args) {
@@ -66,7 +66,7 @@ describe("sp_record dispatch integration", () => {
       expect(progress).toEqual([
         {
           stage: "node_recorded",
-          message: "plan recorded as passed; workflow is at plan-complete.",
+          message: "plan reported as passed; workflow is at plan-complete.",
         },
       ])
     } finally {
@@ -88,7 +88,7 @@ describe("sp_record dispatch integration", () => {
       })
 
       const progress: Array<{ stage: string; message: string }> = []
-      const handler = createRecordHandler({
+      const handler = createReportHandler({
         store,
         orchestrator: {
           async dispatch() {
@@ -118,7 +118,7 @@ describe("sp_record dispatch integration", () => {
       expect(progress).toEqual([
         {
           stage: "node_recorded",
-          message: "question recorded as needs_user; workflow is at waiting-user.",
+          message: "question reported as needs_user; workflow is at waiting-user.",
         },
         {
           stage: "waiting_user_input",

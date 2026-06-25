@@ -6,7 +6,6 @@ import { buildWorkflowProposal } from "../src/controller/proposal"
 import { prepareStartRun } from "../src/controller/intake"
 import { createProjectStore } from "../src/state/store"
 import { createPrepareTool } from "../src/tools/sp-prepare"
-import { createRouteTool } from "../src/tools/sp-route"
 import { createStartTool } from "../src/tools/sp-start"
 
 const toolContext = {
@@ -87,60 +86,7 @@ describe("controller intake", () => {
   })
 })
 
-describe("sp_route and sp_start tools", () => {
-  test("sp_route reports that a proposal is waiting for user confirmation", async () => {
-    const project = mkdtempSync(join(tmpdir(), "sp-route-progress-"))
-    try {
-      const store = createProjectStore(project)
-      const progress: Array<{ stage: string; message: string }> = []
-      const route = createRouteTool(store, {
-        async report(input) {
-          progress.push({ stage: input.stage, message: input.message })
-        },
-      })
-
-      await route.execute(
-        {
-          request: "/sp-debug fix failing tests",
-          command: "/sp-debug",
-        },
-        toolContext,
-      )
-
-      expect(progress).toEqual([
-        {
-          stage: "waiting_user_confirmation",
-          message: "debug workflow proposal is ready; waiting for user confirmation.",
-        },
-      ])
-    } finally {
-      rmSync(project, { recursive: true, force: true })
-    }
-  })
-
-  test("sp_route returns a proposal without creating a run", async () => {
-    const project = mkdtempSync(join(tmpdir(), "sp-route-proposal-"))
-    try {
-      const store = createProjectStore(project)
-      const route = createRouteTool(store)
-
-      const output = await route.execute(
-        {
-          request: "/sp-debug fix failing tests",
-          command: "/sp-debug",
-        },
-        toolContext,
-      )
-
-      const proposal = JSON.parse(toolOutput(output))
-      expect(proposal.workflow).toBe("debug")
-      expect(proposal.requires_confirmation).toBe(true)
-      expect(store.readCurrent()).toBeNull()
-    } finally {
-      rmSync(project, { recursive: true, force: true })
-    }
-  })
-
+describe("sp_prepare and sp_start tools", () => {
   test("sp_start reports that a confirmed workflow run started", async () => {
     const project = mkdtempSync(join(tmpdir(), "sp-start-progress-"))
     try {
@@ -173,7 +119,7 @@ describe("sp_route and sp_start tools", () => {
     }
   })
 
-  test("sp_prepare creates a planning draft and dispatches sp-planner", async () => {
+  test("sp_prepare creates a prepared workflow without dispatching node work", async () => {
     const project = mkdtempSync(join(tmpdir(), "sp-prepare-"))
     try {
       const store = createProjectStore(project)
@@ -203,16 +149,8 @@ describe("sp_route and sp_start tools", () => {
       const result = JSON.parse(toolOutput(output))
       expect(result.state.activation).toBe("draft")
       expect(result.state.current_phase).toBe("plan")
-      expect(store.readCurrent()?.node_runs[0]?.id).toBe("001-plan")
-      expect(result.dispatches).toEqual([
-        {
-          action: "create_session",
-          phase: "plan",
-          agent: "sp-planner",
-          session_id: "session-planner",
-        },
-      ])
-      expect(store.readCurrent()?.node_runs[0]?.agent).toBe("sp-planner")
+      expect(store.readCurrent()?.node_runs).toEqual([])
+      expect(result.next).toContain("sp_start")
     } finally {
       rmSync(project, { recursive: true, force: true })
     }

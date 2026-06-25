@@ -1,8 +1,8 @@
 ---
-description: Route a request through Superpowers Controller
+description: Prepare or resume a Superpowers workflow
 agent: superpowers
 ---
 
-Classify and route this request through sp_route:
+Call sp_status, then prepare or continue this task with sp_prepare if needed:
 
 $ARGUMENTS

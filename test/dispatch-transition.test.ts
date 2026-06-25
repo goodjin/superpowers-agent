@@ -49,7 +49,7 @@ describe("decideNextDispatches", () => {
     ])
   })
 
-  test("implementation passed dispatches spec review only", () => {
+  test("implementation passed dispatches acceptance review only", () => {
     const record: SpRecordInput = {
       event: "implementation",
       status: "passed",
@@ -61,31 +61,31 @@ describe("decideNextDispatches", () => {
     const decisions = decideNextDispatches(state(), record)
 
     expect(decisions).toHaveLength(1)
-    expect(decisions[0]).toMatchObject({ agent: "sp-spec-reviewer" })
+    expect(decisions[0]).toMatchObject({ agent: "sp-acceptance-reviewer", phase: "acceptance" })
   })
 
   test("review transitions are serial", () => {
-    const specReview = decideNextDispatches(state({ current_phase: "spec-review" }), {
-      event: "spec-review",
+    const acceptance = decideNextDispatches(state({ current_phase: "acceptance" }), {
+      event: "acceptance",
       status: "passed",
-      summary: "Spec review passed.",
-      artifacts: { spec_review: "No issues." },
-      gates: { spec_review_passed: true },
+      summary: "Acceptance passed.",
+      artifacts: { acceptance: "No issues." },
+      gates: { acceptance_passed: true },
     })
 
-    expect(specReview).toHaveLength(1)
-    expect(specReview[0]).toMatchObject({ agent: "sp-code-reviewer" })
+    expect(acceptance).toHaveLength(1)
+    expect(acceptance[0]).toMatchObject({ agent: "sp-verifier" })
 
-    const codeReview = decideNextDispatches(state({ current_phase: "code-review" }), {
-      event: "code-review",
+    const verification = decideNextDispatches(state({ current_phase: "verification" }), {
+      event: "verification",
       status: "passed",
-      summary: "Code review passed.",
-      artifacts: { code_review: "No issues." },
-      gates: { code_review_passed: true },
+      summary: "Verification passed.",
+      artifacts: { verification_log: "Tests passed." },
+      gates: { verification_fresh: true },
     })
 
-    expect(codeReview).toHaveLength(1)
-    expect(codeReview[0]).toMatchObject({ agent: "sp-verifier" })
+    expect(verification).toHaveLength(1)
+    expect(verification[0]).toMatchObject({ agent: "sp-code-reviewer" })
   })
 
   test("plan passed dispatches all runnable implementer tasks", () => {

@@ -1,4 +1,4 @@
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs"
 import { dirname, join } from "node:path"
 import { randomUUID } from "node:crypto"
 import { applyRecord, createInitialState } from "./transitions"
@@ -9,6 +9,7 @@ export type ProjectStore = {
   root: string
   readCurrent(): WorkflowState | null
   readRun(runID: string): WorkflowState | null
+  listRuns(): WorkflowState[]
   start(args: { session: string; mode: WorkflowMode; goal: string }): WorkflowState
   startRun(args: {
     workflow: WorkflowKind
@@ -32,6 +33,7 @@ export type ProjectStore = {
   }): WorkflowState
   record(record: WorkflowRecord): WorkflowState
   recordNodeResult(args: { nodeID?: string; input: WorkflowRecord }): WorkflowState
+  cancel(args: { runID?: string; taskID?: string; sessionID?: string; reason?: string }): WorkflowState
   addNodeRun(args: {
     phase: string
     agent: string
@@ -57,6 +59,15 @@ export function createProjectStore(project: string): ProjectStore {
       const statePath = join(root, "runs", runID, "state.json")
       if (!existsSync(statePath)) return null
       return JSON.parse(readFileSync(statePath, "utf8")) as WorkflowState
+    },
+    listRuns() {
+      const runsRoot = join(root, "runs")
+      if (!existsSync(runsRoot)) return []
+      return readdirSync(runsRoot, { withFileTypes: true })
+        .filter((entry) => entry.isDirectory())
+        .map((entry) => this.readRun(entry.name))
+        .filter((state): state is WorkflowState => Boolean(state))
+        .sort((a, b) => b.updated_at.localeCompare(a.updated_at))
     },
     start(args) {
       const state = createInitialState({
@@ -86,7 +97,9 @@ export function createProjectStore(project: string): ProjectStore {
       writeState(root, state)
       writeCurrent(root, state.id)
       writeRunMarkdown(root, state.id, "request.md", args.request)
+      writeRunMarkdown(root, state.id, "task.md", args.request)
       writeRunMarkdown(root, state.id, "proposal.md", args.proposal)
+      appendEvent(root, state.id, { type: "workflow_started", workflow: state.workflow, entrypoint: state.entrypoint })
       appendChangelog(root, state.id, `created ${args.workflow} workflow from ${args.entrypoint}`)
       return state
     },
@@ -104,7 +117,9 @@ export function createProjectStore(project: string): ProjectStore {
       writeState(root, state)
       writeCurrent(root, state.id)
       writeRunMarkdown(root, state.id, "request.md", args.request)
+      writeRunMarkdown(root, state.id, "task.md", args.request)
       writeRunMarkdown(root, state.id, "proposal.md", args.proposal)
+      appendEvent(root, state.id, { type: "workflow_prepared", workflow: state.workflow, entrypoint: state.entrypoint })
       appendChangelog(root, state.id, `prepared ${args.workflow} workflow from ${args.entrypoint}`)
       return state
     },
@@ -132,7 +147,7 @@ export function createProjectStore(project: string): ProjectStore {
     record(record) {
       const current = this.readCurrent()
       if (!current) {
-        throw new Error("No active Superpowers workflow. Call sp_route or sp_next first.")
+        throw new Error("No active Superpowers workflow. Call sp_status or sp_prepare first.")
       }
       writeArtifacts(root, current.id, record.artifacts ?? {})
       const nodeIndex = current.history.filter((entry) => entry.event !== "created").length + 1
@@ -155,9 +170,11 @@ export function createProjectStore(project: string): ProjectStore {
       const nodeID = args.nodeID ?? nextNodeID(current, args.input.event)
       writeArtifacts(root, current.id, args.input.artifacts ?? {})
       writeNodeRecordByID(root, current.id, nodeID, args.input)
+      writeReportForNode(root, current, nodeID, args.input)
       if (args.input.task_graph) {
         const normalized = normalizeTaskGraph(args.input.task_graph)
         writeJson(root, current.id, "task_graph.json", normalized)
+        writeJson(root, current.id, "tasks.json", normalized)
       }
       const next = applyRecord(current, args.input)
       const nodeRuns = completeNodeRuns(next.node_runs, nodeID, args.input)
@@ -174,8 +191,60 @@ export function createProjectStore(project: string): ProjectStore {
       }
       writeState(root, withNodes)
       writeCurrent(root, withNodes.id)
+      appendEvent(root, withNodes.id, {
+        type: "report_received",
+        node_id: nodeID,
+        event: args.input.event,
+        status: args.input.status,
+        summary: args.input.summary,
+      })
       appendChangelog(root, withNodes.id, `${args.input.event}: ${args.input.status} - ${args.input.summary}`)
       return withNodes
+    },
+    cancel(args) {
+      const current = args.runID ? this.readRun(args.runID) : this.readCurrent()
+      if (!current) {
+        throw new Error("No Superpowers workflow found to cancel.")
+      }
+      const now = new Date().toISOString()
+      const nodeRuns = current.node_runs.map((run) => {
+        const matchesTask = args.taskID && run.task_id === args.taskID
+        const matchesSession = args.sessionID && run.session_id === args.sessionID
+        const matchesWorkflow = !args.taskID && !args.sessionID
+        if (!matchesTask && !matchesSession && !matchesWorkflow) return run
+        if (!["running", "blocked", "needs_user"].includes(run.status)) return run
+        return {
+          ...run,
+          status: "blocked" as const,
+          closed_at: now,
+        }
+      })
+      const next: WorkflowState = {
+        ...current,
+        status: args.taskID || args.sessionID ? current.status : "canceled",
+        node_runs: nodeRuns,
+        updated_at: now,
+        history: [
+          ...current.history,
+          {
+            at: now,
+            event: args.taskID ? "task_canceled" : args.sessionID ? "session_canceled" : "workflow_canceled",
+            from: current.phase,
+            to: current.phase,
+            summary: args.reason,
+          },
+        ],
+      }
+      writeState(root, next)
+      writeCurrent(root, next.id)
+      appendEvent(root, next.id, {
+        type: args.taskID ? "task_canceled" : args.sessionID ? "session_canceled" : "workflow_canceled",
+        task_id: args.taskID,
+        session_id: args.sessionID,
+        reason: args.reason,
+      })
+      appendChangelog(root, next.id, `cancel ${args.taskID ?? args.sessionID ?? "workflow"}${args.reason ? `: ${args.reason}` : ""}`)
+      return next
     },
     addNodeRun(args) {
       const current = this.readCurrent()
@@ -203,7 +272,15 @@ export function createProjectStore(project: string): ProjectStore {
         updated_at: new Date().toISOString(),
       }
       writeNodeTask(root, current.id, node.id, args.task_markdown)
+      writeReportTask(root, current.id, node.task_id ?? node.id, args.task_markdown)
       writeState(root, next)
+      appendEvent(root, current.id, {
+        type: "session_started",
+        node_id: node.id,
+        task_id: node.task_id,
+        agent: node.agent,
+        session_id: node.session_id,
+      })
       appendChangelog(root, current.id, `dispatch ${node.agent} ${node.task_id ?? node.phase} to ${node.session_id}`)
       return node
     },
@@ -283,6 +360,9 @@ function writeState(root: string, state: WorkflowState): void {
   const statePath = join(root, "runs", state.id, "state.json")
   mkdirSync(dirname(statePath), { recursive: true })
   writeFileSync(statePath, `${JSON.stringify(state, null, 2)}\n`)
+  writeFileSync(join(root, "runs", state.id, "workflow.json"), `${JSON.stringify(state, null, 2)}\n`)
+  writeJson(root, state.id, "sessions.json", { sessions: state.node_runs })
+  if (state.task_graph) writeJson(root, state.id, "tasks.json", state.task_graph)
 }
 
 function writeRunMarkdown(root: string, run: string, filename: string, body: string): void {
@@ -307,6 +387,19 @@ function writeArtifacts(root: string, run: string, artifacts: NonNullable<Workfl
     const artifactPath = join(root, "runs", run, "artifacts", `${name}.md`)
     mkdirSync(dirname(artifactPath), { recursive: true })
     writeFileSync(artifactPath, `${body.trim()}\n`)
+    const flatName = flatArtifactFilename(name)
+    if (flatName) writeRunMarkdown(root, run, flatName, body)
+  }
+}
+
+function flatArtifactFilename(name: string): string | undefined {
+  switch (name) {
+    case "spec":
+      return "spec.md"
+    case "plan":
+      return "plan.md"
+    default:
+      return undefined
   }
 }
 
@@ -328,11 +421,72 @@ function writeNodeTask(root: string, run: string, node: string, body: string): v
   writeFileSync(join(nodeRoot, "task.md"), body.endsWith("\n") ? body : `${body}\n`)
 }
 
+function writeReportTask(root: string, run: string, taskID: string, body: string): void {
+  const reportRoot = join(root, "runs", run, "reports", taskID)
+  mkdirSync(reportRoot, { recursive: true })
+  writeFileSync(join(reportRoot, "task.md"), body.endsWith("\n") ? body : `${body}\n`)
+}
+
+function writeReportForNode(root: string, state: WorkflowState, nodeID: string, record: WorkflowRecord): void {
+  const nodeRun = state.node_runs.find((run) => run.id === nodeID)
+  const taskID = nodeRun?.task_id ?? nodeID
+  const filename = reportFilenameForEvent(record.event)
+  if (!filename) return
+  const reportRoot = join(root, "runs", state.id, "reports", taskID)
+  mkdirSync(reportRoot, { recursive: true })
+  const body = record.artifacts?.[artifactForReportEvent(record.event)] ?? record.findings ?? record.checks ?? record.summary
+  writeFileSync(join(reportRoot, filename), `${body.trim()}\n`)
+}
+
+function reportFilenameForEvent(event: WorkflowRecord["event"]): string | undefined {
+  switch (event) {
+    case "implementation":
+    case "debug":
+    case "question":
+      return "report.md"
+    case "acceptance":
+      return "acceptance.md"
+    case "code-review":
+      return "code_review.md"
+    case "verification":
+      return "verification.md"
+    case "finish":
+      return "finish.md"
+    default:
+      return undefined
+  }
+}
+
+function artifactForReportEvent(event: WorkflowRecord["event"]): keyof NonNullable<WorkflowRecord["artifacts"]> {
+  switch (event) {
+    case "acceptance":
+      return "acceptance"
+    case "code-review":
+      return "code_review"
+    case "verification":
+      return "verification_log"
+    case "finish":
+      return "finish_note"
+    case "debug":
+      return "root_cause"
+    case "implementation":
+      return "patch_summary"
+    default:
+      return "request"
+  }
+}
+
 function appendChangelog(root: string, run: string, message: string): void {
   const path = join(root, "runs", run, "changelog.md")
   mkdirSync(dirname(path), { recursive: true })
   const current = existsSync(path) ? readFileSync(path, "utf8") : "# Changelog\n\n"
   writeFileSync(path, `${current.trimEnd()}\n- ${new Date().toISOString()} ${message}\n`)
+}
+
+function appendEvent(root: string, run: string, event: Record<string, unknown>): void {
+  const path = join(root, "runs", run, "events.jsonl")
+  mkdirSync(dirname(path), { recursive: true })
+  appendFileSync(path, `${JSON.stringify({ at: new Date().toISOString(), ...event })}\n`)
 }
 
 function nextNodeID(state: WorkflowState, event: string): string {
@@ -350,13 +504,22 @@ function nextDispatchNodeID(state: WorkflowState, phase: string, taskID: string 
 }
 
 function completeNodeRuns(nodeRuns: NodeRun[], nodeID: string, record: WorkflowRecord): NodeRun[] {
-  const endedAt = new Date().toISOString()
+  const reportedAt = new Date().toISOString()
   return nodeRuns.map((run) => {
     if (run.id !== nodeID) return run
+    if (record.status === "progress") {
+      return {
+        ...run,
+        reported_at: reportedAt,
+        record_path: `nodes/${nodeID}/record.json`,
+      }
+    }
     return {
       ...run,
       status: record.status,
-      ended_at: endedAt,
+      reported_at: reportedAt,
+      closed_at: reportedAt,
+      ended_at: reportedAt,
       record_path: `nodes/${nodeID}/record.json`,
     }
   })

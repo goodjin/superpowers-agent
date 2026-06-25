@@ -6,7 +6,7 @@ const GATE_ARTIFACTS: Partial<Record<WorkflowGate, WorkflowArtifact>> = {
   root_cause_found: "root_cause",
   red_test_seen: "red_test_log",
   implementation_done: "patch_summary",
-  spec_review_passed: "spec_review",
+  acceptance_passed: "acceptance",
   code_review_passed: "code_review",
   verification_fresh: "verification_log",
 }
@@ -47,24 +47,24 @@ export function applyRecord(state: WorkflowState, record: WorkflowRecord): Workf
   const gateUpdates = record.gates ?? {}
   const enabledGateUpdates = Object.entries(gateUpdates).filter(([, value]) => value === true)
   if (enabledGateUpdates.length > 3) {
-    throw new Error("sp_record rejected: too many gates updated in one record")
+    throw new Error("sp_report rejected: too many gates updated in one report")
   }
 
   if (record.event === "finish" && record.status === "passed" && state.gates.verification_fresh !== true) {
-    throw new Error("sp_record rejected: verification_fresh is required before completion records")
+    throw new Error("sp_report rejected: verification_fresh is required before completion reports")
   }
 
   if (record.event === "finish" && record.status === "passed") {
     const incomplete = incompleteTaskIDs(state)
     if (incomplete.length > 0) {
-      throw new Error(`sp_record rejected: task_graph has incomplete tasks before completion records: ${incomplete.join(", ")}`)
+      throw new Error(`sp_report rejected: task_graph has incomplete tasks before completion reports: ${incomplete.join(", ")}`)
     }
   }
 
   for (const [gate] of enabledGateUpdates) {
     const requiredArtifact = GATE_ARTIFACTS[gate as WorkflowGate]
     if (requiredArtifact && !record.artifacts?.[requiredArtifact] && !state.artifacts[requiredArtifact]) {
-      throw new Error(`sp_record rejected: ${gate} requires ${requiredArtifact} artifact`)
+      throw new Error(`sp_report rejected: ${gate} requires ${requiredArtifact} artifact`)
     }
   }
 
@@ -119,6 +119,7 @@ function workflowForMode(mode: WorkflowMode): WorkflowKind {
 }
 
 function statusForRecord(state: WorkflowState, record: WorkflowRecord): WorkflowState["status"] {
+  if (record.status === "progress") return state.status === "waiting_user" ? "running" : state.status
   if (record.status === "needs_user") return "waiting_user"
   if (record.status === "blocked") return "blocked"
   if (record.status === "failed") return "failed"
@@ -148,7 +149,7 @@ function initialPhase(mode: WorkflowMode): string {
     case "parallel-investigate":
       return "investigate"
     case "review":
-      return "spec-review"
+      return "acceptance"
     case "verify-finish":
       return "fresh-verification"
     default:
@@ -173,8 +174,8 @@ function phaseForRecord(state: WorkflowState, record: WorkflowRecord): string {
       return "red-test-recorded"
     case "implementation":
       return record.status === "passed" ? "implementation-complete" : "implementation-retry"
-    case "spec-review":
-      return record.status === "passed" ? "spec-review-passed" : "implementation-retry"
+    case "acceptance":
+      return record.status === "passed" ? "acceptance-passed" : "implementation-retry"
     case "code-review":
       return record.status === "passed" ? "code-review-passed" : "implementation-retry"
     case "verification":

@@ -7,6 +7,7 @@ describe("createAgentConfig", () => {
     const agents = createAgentConfig()
 
     expect(Object.keys(agents).sort()).toEqual([
+      "sp-acceptance-reviewer",
       "sp-code-reviewer",
       "sp-debugger",
       "sp-designer",
@@ -14,7 +15,6 @@ describe("createAgentConfig", () => {
       "sp-implementer",
       "sp-investigator",
       "sp-planner",
-      "sp-spec-reviewer",
       "sp-verifier",
       "super-agent",
     ])

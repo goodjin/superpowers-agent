@@ -9,13 +9,13 @@ const nodeEventSchema = z.enum([
   "debug",
   "red-test",
   "implementation",
-  "spec-review",
+  "acceptance",
   "code-review",
   "verification",
   "finish",
 ])
 
-const nodeStatusSchema = z.enum(["passed", "failed", "blocked", "needs_user"])
+const nodeStatusSchema = z.enum(["progress", "passed", "failed", "blocked", "needs_user"])
 
 const artifactNameSchema = z.enum([
   "request",
@@ -24,7 +24,7 @@ const artifactNameSchema = z.enum([
   "root_cause",
   "red_test_log",
   "patch_summary",
-  "spec_review",
+  "acceptance",
   "code_review",
   "verification_log",
   "finish_note",
@@ -38,7 +38,7 @@ const gateNameSchema = z.enum([
   "root_cause_found",
   "red_test_seen",
   "implementation_done",
-  "spec_review_passed",
+  "acceptance_passed",
   "code_review_passed",
   "verification_fresh",
 ])
@@ -51,6 +51,19 @@ const taskSchema = z
     depends_on: z.array(z.string().min(1)),
     files: z.array(z.string().min(1)).optional(),
     test_commands: z.array(z.string().min(1)).optional(),
+    checks: z
+      .array(
+        z
+          .object({
+            kind: z.enum(["acceptance", "verification", "code_review"]),
+            status: z.enum(["pending", "running", "passed", "failed", "skipped", "stale"]),
+            summary: z.string().optional(),
+            session_id: z.string().optional(),
+            report_path: z.string().optional(),
+          })
+          .strict(),
+      )
+      .optional(),
   })
   .strict()
 

@@ -163,9 +163,9 @@ describe("progress panel view model", () => {
       artifacts: {},
       node_runs: [
         {
-          id: "030-spec-review",
-          phase: "spec-review",
-          agent: "sp-spec-reviewer",
+          id: "030-acceptance",
+          phase: "acceptance",
+          agent: "sp-acceptance-reviewer",
           session_id: "session-review",
           status: "running",
           attempts: 1,
@@ -178,21 +178,21 @@ describe("progress panel view model", () => {
       at: "2026-06-19T00:00:20.000Z",
       kind: "tool_pending",
       session_id: "session-review",
-      node_id: "030-spec-review",
-      agent: "sp-spec-reviewer",
-      phase: "spec-review",
+      node_id: "030-acceptance",
+      agent: "sp-acceptance-reviewer",
+      phase: "acceptance",
       summary: "write pending",
     }
 
     const model = buildProgressPanelViewModel(
       state,
-      { "030-spec-review": [latest] },
+      { "030-acceptance": [latest] },
       { "session-review": "busy" },
       new Date("2026-06-19T00:01:00.000Z"),
     )
 
     expect(model.rows[0]?.activity_status).toBe("stalled")
     expect(renderProgressPanelText(model)).toContain("status: running / busy / stalled")
-    expect(renderCompactProgressText(model)).toBe("SP: sp-spec-reviewer running/busy/stalled - write pending")
+    expect(renderCompactProgressText(model)).toBe("SP: sp-acceptance-reviewer running/busy/stalled - write pending")
   })
 })

@@ -19,7 +19,7 @@ export function buildRuntimeSkillInjection(state: WorkflowState): string {
     "- Load and follow the primary skill before doing node work.",
     "- Prefer one primary skill per session.",
     "- If supporting skills require substantial independent work, create or route a separate subagent session for that skill.",
-    "- End the node by calling sp_record with event, status, summary, artifacts, gates, checks, findings, question, or task_graph as relevant.",
+    "- End the node by calling sp_report with event, status, summary, artifacts, gates, checks, findings, question, or task_graph as relevant.",
     "- Do not include next_action, target_session_id, child_session_id, reuse_session_id, create_sessions, or skills_used.",
     `${MARKER.replace("<", "</")}`,
   ].join("\n")

@@ -2,14 +2,14 @@
 
 ## Responsibility
 
-state 模块负责 workflow run 的本地持久化、artifact 写入、task graph 规范化、node run 跟踪和 `sp_record` gate 校验。插件的关键判断读取 JSON state，不解析 markdown。
+state 模块负责 workflow run 的本地持久化、artifact/report 写入、task graph 规范化、node run 跟踪和 `sp_report` gate 校验。插件的关键判断读取 JSON state，不解析 markdown。
 
 ## Files
 
 - `src/state/types.ts`：workflow、record、task graph、gate、artifact 和 `NodeRun` 类型。
 - `src/state/store.ts`：读写 current pointer、run directory、state、artifacts、nodes 和 changelog。
-- `src/state/transitions.ts`：把 `sp_record` 应用到 workflow state，校验 gate 和 artifact 关系。
-- `src/state/record-schema.ts`：严格解析 `sp_record` 输入，拒绝 control-plane 字段。
+- `src/state/transitions.ts`：把 `sp_report` 应用到 workflow state，校验 gate 和 artifact 关系。
+- `src/state/record-schema.ts`：严格解析 `sp_report` 输入，拒绝 control-plane 字段。
 - `src/state/task-graph.ts`：校验 task dependency、加入共享写文件隐式依赖、计算 runnable tasks。
 
 ## Run Layout
@@ -19,11 +19,23 @@ state 模块负责 workflow run 的本地持久化、artifact 写入、task grap
   current.json
   runs/<run-id>/
     state.json
+    workflow.json
+    sessions.json
     request.md
+    task.md
     proposal.md
+    events.jsonl
     changelog.md
+    tasks.json
     task_graph.json
     artifacts/*.md
+    reports/<task-id>/
+      task.md
+      report.md
+      acceptance.md
+      verification.md
+      code_review.md
+      finish.md
     nodes/<node-id>/
       task.md
       record.json
@@ -62,10 +74,11 @@ state 模块负责 workflow run 的本地持久化、artifact 写入、task grap
 - `status`
 - `attempts`
 - `started_at`
-- `ended_at`
+- `reported_at`
+- `closed_at`
 - `record_path`
 
-`recordNodeResult()` 会把 matching node 从 `running` 更新成 `passed`、`failed`、`blocked` 或 `needs_user`，并写入 `nodes/<node-id>/record.json` 和 `output.md`。
+`recordNodeResult()` 会把 matching node 从 `running` 更新成 `passed`、`failed`、`blocked` 或 `needs_user`；`progress` 只更新 `reported_at`，不会关闭 session run。记录会写入 `nodes/<node-id>/record.json`、`output.md` 和 `reports/<task-id>/...`。
 
 ## Task Graph
 

@@ -7,7 +7,7 @@ export type AgentConfigOptions = {
 }
 
 const RECORD_RULE = [
-  "Before ending the node, call sp_record with event, status, summary, artifacts, gates, checks, findings, question, or task_graph as relevant.",
+  "Before ending the node, call sp_report with event, status, summary, artifacts, gates, checks, findings, question, or task_graph as relevant.",
   "Do not include next_action, target_session_id, child_session_id, reuse_session_id, create_sessions, or skills_used.",
   "The plugin owns workflow routing, session creation, session reuse, and retry decisions.",
 ].join(" ")
@@ -18,7 +18,7 @@ const AGENT_PURPOSES: Record<NodeAgentName, string> = {
   "sp-debugger": "Debug node. Investigate symptoms and record the root cause before repair work starts.",
   "sp-investigator": "Investigation node. Read one independent problem domain and report findings without changing files.",
   "sp-implementer": "Implementation node. Execute one assigned task with TDD evidence and patch summary.",
-  "sp-spec-reviewer": "Spec review node. Check whether the implementation satisfies the request, spec, and plan.",
+  "sp-acceptance-reviewer": "Acceptance review node. Check whether the implementation satisfies the confirmed task, spec, plan, and acceptance criteria.",
   "sp-code-reviewer": "Code review node. Review regressions, quality risks, missing tests, and maintainability.",
   "sp-verifier": "Verification node. Run fresh verification commands and record command evidence.",
   "sp-finisher": "Finish node. Prepare final delivery only after verification has passed.",
@@ -47,8 +47,8 @@ export function createAgentConfig(options: AgentConfigOptions = {}): AgentConfig
         "Understand user intent, inspect active workflow state, clarify missing constraints, and keep the user in control of every start, resume, and confirmation point.",
         "Do not directly implement code, edit files, or perform node work.",
         "Do not load business or development skills. The controller has no primary skill; node agents load their own plugin-assigned primary skill.",
-        "Use sp_state and sp_next before deciding whether this is a new task, a resume, or a waiting workflow that still needs user input.",
-        "For planning-driven work, follow this sequence: clarify with the user, call sp_route, get user confirmation, call sp_prepare, review the generated plan artifacts, ask the user to confirm execution, then call sp_start.",
+        "Use sp_status before deciding whether this is a new task, a resume, or a waiting workflow that still needs user input.",
+        "For planning-driven work, follow this sequence: clarify with the user, call sp_prepare, review the generated plan artifacts, ask the user to confirm execution, then call sp_start.",
         "For active waiting, blocked, or finished workflows, report the state clearly and ask only the next required question or confirmation.",
         "Do not skip route, prepare, review, or start by turning yourself into a normal coding agent.",
         "Never call the native task tool. Child node sessions must be created by Superpowers tools so state.node_runs is registered before the child prompt starts.",

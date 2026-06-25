@@ -26,7 +26,7 @@ export type WorkflowGate =
   | "root_cause_found"
   | "red_test_seen"
   | "implementation_done"
-  | "spec_review_passed"
+  | "acceptance_passed"
   | "code_review_passed"
   | "verification_fresh"
 
@@ -37,7 +37,7 @@ export type WorkflowArtifact =
   | "root_cause"
   | "red_test_log"
   | "patch_summary"
-  | "spec_review"
+  | "acceptance"
   | "code_review"
   | "verification_log"
   | "finish_note"
@@ -50,12 +50,22 @@ export type NodeEvent =
   | "debug"
   | "red-test"
   | "implementation"
-  | "spec-review"
+  | "acceptance"
   | "code-review"
   | "verification"
   | "finish"
 
-export type NodeStatus = "passed" | "failed" | "blocked" | "needs_user"
+export type NodeStatus = "progress" | "passed" | "failed" | "blocked" | "needs_user"
+
+export type CheckKind = "acceptance" | "verification" | "code_review"
+
+export type CheckState = {
+  kind: CheckKind
+  status: "pending" | "running" | "passed" | "failed" | "skipped" | "stale"
+  summary?: string
+  session_id?: string
+  report_path?: string
+}
 
 export type TaskGraph = {
   tasks: Array<{
@@ -65,6 +75,7 @@ export type TaskGraph = {
     depends_on: string[]
     files?: string[]
     test_commands?: string[]
+    checks?: CheckState[]
   }>
 }
 
@@ -80,6 +91,8 @@ export type NodeRun = {
   status: NodeRunStatus
   attempts: number
   started_at: string
+  reported_at?: string
+  closed_at?: string
   ended_at?: string
   record_path?: string
 }
@@ -111,7 +124,7 @@ export type WorkflowState = {
   mode: WorkflowMode
   phase: string
   current_phase: string
-  status: "intake" | "running" | "waiting_user" | "blocked" | "passed" | "failed"
+  status: "intake" | "running" | "waiting_user" | "blocked" | "passed" | "failed" | "canceled" | "recovered_unknown"
   goal: string
   created_at: string
   updated_at: string

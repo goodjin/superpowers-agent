@@ -32,12 +32,6 @@ export function createStartTool(
           runID: args.run_id,
           parentSessionID: sessionID,
         })
-        dispatches = await dispatchApprovedPlan({
-          store,
-          orchestrator,
-          state,
-          taskID: args.task_id,
-        })
       } else {
         if (!args.request || !args.workflow || !args.entrypoint || !args.proposal) {
           throw new Error("sp_start requires request, workflow, entrypoint, and proposal when run_id is not provided.")
@@ -51,6 +45,12 @@ export function createStartTool(
         })
         state = store.startRun(start)
       }
+      dispatches = await dispatchStart({
+        store,
+        orchestrator,
+        state,
+        taskID: args.task_id,
+      })
       await progress.report({
         stage: "run_started",
         title: "Superpowers workflow",
@@ -60,7 +60,7 @@ export function createStartTool(
       return JSON.stringify(
         {
           state,
-          dispatches: dispatches.length > 0 ? dispatches : decideNextDispatches(state),
+          dispatches: dispatches.length > 0 ? dispatches : startDecisions(state),
         },
         null,
         2,
@@ -69,18 +69,14 @@ export function createStartTool(
   })
 }
 
-async function dispatchApprovedPlan(args: {
+async function dispatchStart(args: {
   store: ProjectStore
   orchestrator?: Pick<SessionOrchestrator, "dispatch">
   state: ReturnType<ProjectStore["activateRun"]>
   taskID?: string
 }): Promise<Array<Record<string, string | undefined>>> {
   if (!args.orchestrator) return []
-  const decisions = decideNextDispatches(args.state, {
-    event: "plan",
-    status: "passed",
-    summary: "Plan approved for execution.",
-  })
+  const decisions = startDecisions(args.state)
   const filtered = args.taskID
     ? decisions.filter((decision) => "task_id" in decision && decision.task_id === args.taskID)
     : decisions
@@ -131,6 +127,21 @@ async function dispatchApprovedPlan(args: {
     })
   }
   return dispatches
+}
+
+function startDecisions(state: ReturnType<ProjectStore["activateRun"]>) {
+  if (state.task_graph?.tasks.length && state.current_phase === "plan-complete") {
+    return decideNextDispatches(state, {
+      event: "plan",
+      status: "passed",
+      summary: "Plan approved for execution.",
+    })
+  }
+  return decideNextDispatches(state, {
+    event: "intake",
+    status: "passed",
+    summary: "Workflow start confirmed.",
+  })
 }
 
 function nextDispatchNodeID(index: number, phase: string, taskID?: string): string {

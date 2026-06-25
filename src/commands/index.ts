@@ -1,15 +1,15 @@
 export type CommandConfigRecord = Record<string, Record<string, unknown>>
 
 const COMMANDS: Array<[string, string, string]> = [
-  ["sp", "Route a request through Superpowers Controller", "Classify and route this request through sp_route: $ARGUMENTS"],
-  ["sp-design", "Start or resume Superpowers design workflow", "Start design workflow for: $ARGUMENTS"],
-  ["sp-plan", "Start or resume Superpowers planning workflow", "Start planning workflow for: $ARGUMENTS"],
-  ["sp-prepare", "Prepare a planning draft before execution starts", "Prepare a planning draft for: $ARGUMENTS"],
-  ["sp-debug", "Start or resume Superpowers debugging workflow", "Start debugging workflow for: $ARGUMENTS"],
-  ["sp-execute", "Execute the current Superpowers plan", "Execute planned workflow tasks for: $ARGUMENTS"],
-  ["sp-review", "Run Superpowers review workflow", "Review current work or feedback: $ARGUMENTS"],
-  ["sp-verify", "Run Superpowers verification workflow", "Verify current work before completion: $ARGUMENTS"],
-  ["sp-reset", "Reset active Superpowers workflow pointer", "Call sp_reset and explain the archived run pointer was cleared."],
+  ["sp", "Prepare or resume a Superpowers workflow", "Call sp_status, then prepare or continue this task with sp_prepare if needed: $ARGUMENTS"],
+  ["sp-design", "Prepare a Superpowers feature workflow", "Call sp_status, then sp_prepare kind=feature for: $ARGUMENTS"],
+  ["sp-plan", "Prepare a Superpowers plan-only workflow", "Call sp_status, then sp_prepare kind=plan-only for: $ARGUMENTS"],
+  ["sp-prepare", "Prepare a workflow before execution starts", "Call sp_prepare for: $ARGUMENTS"],
+  ["sp-debug", "Prepare a Superpowers debugging workflow", "Call sp_status, then sp_prepare kind=debug for: $ARGUMENTS"],
+  ["sp-execute", "Start the prepared Superpowers workflow", "Call sp_status, ask for confirmation if needed, then sp_start for: $ARGUMENTS"],
+  ["sp-review", "Prepare a Superpowers review workflow", "Call sp_status, then sp_prepare kind=review for: $ARGUMENTS"],
+  ["sp-verify", "Prepare a Superpowers verification workflow", "Call sp_status, then sp_prepare kind=verify-finish for: $ARGUMENTS"],
+  ["sp-cancel", "Cancel a Superpowers workflow", "Call sp_cancel with a concise reason: $ARGUMENTS"],
 ]
 
 export function createCommandConfig(): CommandConfigRecord {

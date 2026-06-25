@@ -6,7 +6,7 @@ export const AGENT_SKILL_MAP = {
   "sp-debugger": "superpowers-systematic-debugging",
   "sp-investigator": "superpowers-dispatching-parallel-agents",
   "sp-implementer": "superpowers-test-driven-development",
-  "sp-spec-reviewer": "superpowers-requesting-code-review",
+  "sp-acceptance-reviewer": "superpowers-requesting-code-review",
   "sp-code-reviewer": "superpowers-requesting-code-review",
   "sp-verifier": "superpowers-verification-before-completion",
   "sp-finisher": "superpowers-finishing-a-development-branch",
@@ -85,10 +85,10 @@ export const MODE_DEFINITIONS: Record<WorkflowMode, ModeDefinition> = {
   }),
   review: nodeMode({
     mode: "review",
-    phase: "spec-review",
-    agent: "sp-spec-reviewer",
-    required_gates: ["spec_review_passed", "code_review_passed"],
-    next: "Run serial spec review first, then code review if spec review passes.",
+    phase: "acceptance",
+    agent: "sp-acceptance-reviewer",
+    required_gates: ["acceptance_passed", "verification_fresh", "code_review_passed"],
+    next: "Run acceptance first, then verification, then code review.",
   }),
   "verify-finish": nodeMode({
     mode: "verify-finish",

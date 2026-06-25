@@ -53,13 +53,13 @@ export function decideNextDispatches(state: WorkflowState, record?: SpRecordInpu
       return planDispatches(state, record)
     case "implementation":
       if (state.node_runs.some((run) => run.agent === "sp-implementer" && run.status === "running")) return []
-      return [create("spec-review", "sp-spec-reviewer", "implementation passed")]
-    case "spec-review":
-      return [create("code-review", "sp-code-reviewer", "spec review passed")]
-    case "code-review":
-      return [create("verification", "sp-verifier", "code review passed")]
+      return [create("acceptance", "sp-acceptance-reviewer", "implementation passed")]
+    case "acceptance":
+      return [create("verification", "sp-verifier", "acceptance passed")]
     case "verification":
-      return [create("finish", "sp-finisher", "verification passed")]
+      return [create("code-review", "sp-code-reviewer", "verification passed")]
+    case "code-review":
+      return [create("finish", "sp-finisher", "code review passed")]
     case "finish":
       return [{ action: "finish", reason: "finish record passed" }]
     default:
@@ -80,7 +80,7 @@ function dispatchEntrypoint(state: WorkflowState): DispatchDecision[] {
     case "plan-only":
       return [create("plan", "sp-planner", "plan workflow confirmed")]
     case "review":
-      return [create("spec-review", "sp-spec-reviewer", "review workflow confirmed")]
+      return [create("acceptance", "sp-acceptance-reviewer", "review workflow confirmed")]
     case "verify-finish":
       return [create("verification", "sp-verifier", "verify-finish workflow confirmed")]
     case "parallel-investigate":
@@ -103,7 +103,7 @@ function planDispatches(state: WorkflowState, record: SpRecordInput): DispatchDe
 }
 
 function failedRecordDispatches(state: WorkflowState, record: SpRecordInput): DispatchDecision[] {
-  if (!["spec-review", "code-review", "verification"].includes(record.event)) {
+  if (!["acceptance", "code-review", "verification"].includes(record.event)) {
     return [{ action: "blocked", reason: record.summary }]
   }
 

@@ -22,7 +22,7 @@ export function buildNodeTaskPrompt(packet: NodeTaskPacket): string {
     artifacts || "- none",
     "",
     packet.retry_context ? `## Retry Context\n${packet.retry_context}\n` : "",
-    "## sp_record Contract",
+    "## sp_report Contract",
     `- event: ${packet.record_contract.event}`,
     `- expected_artifacts: ${packet.record_contract.expected_artifacts.join(", ") || "none"}`,
     `- allowed_gates: ${packet.record_contract.allowed_gates.join(", ") || "none"}`,
@@ -78,7 +78,7 @@ function requiredArtifactsForPhase(phase: string, state: WorkflowState): NodeTas
       return [{ name: "spec", path: "artifacts/spec.md" }]
     case "implement":
       return [{ name: "plan", path: "artifacts/plan.md" }]
-    case "spec-review":
+    case "acceptance":
     case "code-review":
     case "verification":
       return [{ name: "patch_summary", path: "artifacts/patch_summary.md" }]
@@ -99,8 +99,8 @@ function recordContractForPhase(phase: string): NodeTaskPacket["record_contract"
       return { event: "debug", expected_artifacts: ["root_cause"], allowed_gates: ["root_cause_found"] }
     case "implement":
       return { event: "implementation", expected_artifacts: ["patch_summary"], allowed_gates: ["implementation_done"] }
-    case "spec-review":
-      return { event: "spec-review", expected_artifacts: ["spec_review"], allowed_gates: ["spec_review_passed"] }
+    case "acceptance":
+      return { event: "acceptance", expected_artifacts: ["acceptance"], allowed_gates: ["acceptance_passed"] }
     case "code-review":
       return { event: "code-review", expected_artifacts: ["code_review"], allowed_gates: ["code_review_passed"] }
     case "verification":

@@ -7,7 +7,7 @@ session orchestrator 模块把 dispatch decision 变成 OpenCode node session。
 ## Files
 
 - `src/session/task-packet.ts`：node task packet 类型。
-- `src/session/templates.ts`：把 packet 渲染成 node prompt，并声明 primary skill 和 `sp_record` contract。
+- `src/session/templates.ts`：把 packet 渲染成 node prompt，并声明 primary skill 和 `sp_report` contract。
 - `src/session/adapter.ts`：封装 OpenCode SDK 的 `session.create`、`session.prompt`、`tui.showToast` 和 `app.log` fallback。
 - `src/session/orchestrator.ts`：根据 create/reuse dispatch 调用 adapter。
 - `src/router/transition.ts`：生成 orchestrator 消费的 dispatch decision。
@@ -29,9 +29,9 @@ orchestrator 接收：
 - `session_id`
 - `task_markdown`
 
-store 随后用这些信息创建 `node_runs`，并写入 `nodes/<node-id>/task.md`。
+store 随后用这些信息创建 `node_runs`，并写入 `nodes/<node-id>/task.md` 和 `reports/<task-id>/task.md`。
 
-当 decision 是 `create_session` 时，orchestrator 还支持 `onSessionCreated` 回调。工具层会在这个回调里先注册 `node_runs`，再继续发送首条 child prompt。这样 child session 即使立刻调用 `sp_record`，state store 里也已经有对应节点，不会出现 record 先到、node_run 还没落盘的竞态。
+当 decision 是 `create_session` 时，orchestrator 还支持 `onSessionCreated` 回调。工具层会在这个回调里先注册 `node_runs`，再继续发送首条 child prompt。这样 child session 即使立刻调用 `sp_report`，state store 里也已经有对应节点，不会出现 report 先到、node_run 还没落盘的竞态。
 
 ## Progress Behavior
 
@@ -51,6 +51,6 @@ orchestrator 在每次 dispatch 时发送两类 progress：
 ## Notes
 
 - 节点 prompt 只声明一个 primary skill。
-- 模型不能在 `sp_record` 中提交 `next_action`、`child_session_id`、`reuse_session_id` 或 `skills_used`。
+- 模型不能在 `sp_report` 中提交 `next_action`、`child_session_id`、`reuse_session_id` 或 `skills_used`。
 - retry dispatch 优先复用原 implementer session；无法复用时由 transition 创建新的 implementer decision。
 - `test/session-orchestrator.test.ts` 断言 create-session 路径的顺序是 `create -> register -> prompt`，这是避免子会话首轮抢跑的稳定性边界。

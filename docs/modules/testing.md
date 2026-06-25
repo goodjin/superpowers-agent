@@ -11,17 +11,17 @@
 - `test/support/opencode-e2e/harness.ts`：真实 OpenCode e2e 的隔离环境、临时配置、mock LLM、child process 和 workflow state 读取工具。
 - `test/support/opencode-e2e/logging.ts`：e2e 场景日志 helper，统一输出 suite goal、scenario description、step、verification 和 summary。
 - `test/support/opencode-e2e/harness.test.ts`：harness smoke，以及 `node_runs` / `nodes/*` 读取能力验证。
-- `test/controller-intake.test.ts`：proposal 生成、resume proposal、`sp_route` 不创建 run、`sp_prepare` 创建 planning draft、`sp_start` 激活 prepared run 或直接创建 run。
+- `test/controller-intake.test.ts`：proposal 生成、resume proposal、`sp_prepare` 创建 prepared run、`sp_start` 激活 prepared run 或直接创建 run。
 - `test/dispatch-transition.test.ts`：intake、plan、implementation、串行 review、retry 和 needs_user 的 dispatch decision。
 - `test/session-orchestrator.test.ts`：node task markdown 模板、session create/reuse adapter 调用。
 - `test/store-node-runs.test.ts`：`node_runs` 创建、`nodes/*/task.md`、`nodes/*/record.json` 和完成状态更新。
-- `test/sp-record-dispatch.test.ts`：`sp_record(plan)` 后 dispatch implementer，并在 `needs_user` 时不派发。
+- `test/sp-record-dispatch.test.ts`：legacy record handler 覆盖，验证 `sp_report(plan)` 语义后 dispatch implementer，并在 `needs_user` 时不派发。
 - `test/node-progress.test.ts`：child session 事件到节点 progress JSONL 的映射、忽略无关 session、错误摘要。
 - `test/progress-panel.test.ts`：TUI progress panel view-model 和文本渲染。
 - `test/plugin-progress-event.test.ts`：server plugin `event` hook 写入 child progress。
 - `test/tui-plugin.test.ts`：TUI route、命令入口、resident progress slot 注册、slot-specific workflow/sidebar/fallback 渲染，以及无 session props compact progress 渲染。
 - `test/package-entrypoints.test.ts`：package build/export 包含 `./tui` 入口。
-- `test/e2e/opencode-workflow.test.ts`：workflow e2e，覆盖 proposal/start、prepare-review-start、debug root cause、strict debug gate、完整 feature lifecycle、`sp_record` 校验恢复、completion verification、active waiting reroute 和 strict execute gate 顺序。
+- `test/e2e/opencode-workflow.test.ts`：workflow e2e，覆盖 proposal/start、prepare-review-start、debug root cause、strict debug gate、完整 feature lifecycle、`sp_report` 校验恢复、completion verification、active waiting reroute 和 strict execute gate 顺序。
 - `scripts/e2e-opencode-mock-llm.ts`：用临时 OpenCode 配置启动真实 `opencode run`，通过 mock provider 验证 request_id 匹配。
 - `scripts/e2e-opencode-1.16.2.ts`：原有插件加载 smoke，验证 9 个动态注入 agents。
 
@@ -29,7 +29,8 @@
 
 workflow progress 是 side-channel 行为，用单元测试验证，不要求 e2e 解析 OpenCode TUI toast：
 
-- `test/controller-intake.test.ts` 断言 `sp_route` 发送 `waiting_user_confirmation`，`sp_prepare` / `sp_start` 发送 `run_started`。
+- `test/tools.test.ts` 断言 public tool registry 只暴露 `sp_status`、`sp_prepare`、`sp_start`、`sp_cancel`、`sp_report`。
+- `test/controller-intake.test.ts` 断言 `sp_prepare` / `sp_start` 发送 `run_started`。
 - `test/session-orchestrator.test.ts` 断言 dispatch 先发送 `dispatch_started`，成功创建 session 后发送 `node_running`。
 - `test/sp-record-dispatch.test.ts` 断言节点记录后发送 `node_recorded`，`needs_user` 决策额外发送 `waiting_user_input`。
 
@@ -134,14 +135,14 @@ await createOpencodeE2EHarness({
 `bun run test:e2e:opencode` 当前运行 8 个场景：
 
 - harness smoke：验证真实 `opencode run` 能消费 mock LLM response。
-- debug happy path：`sp_route` 返回 proposal，`sp_start` 创建 run，随后通过 `sp_record` 写入 root cause。
+- debug happy path：workflow 创建后通过 `sp_report` 写入 root cause。
 - strict debug gate：缺少 `root_cause_found` 时阻断修复写入。
-- feature lifecycle：一条长链路覆盖 proposal、start、design、plan、两个 implementer dispatch、spec-review、code-review、verification、finish 和 reset 后历史 run 保留。
+- feature lifecycle：一条长链路覆盖 proposal、start、design、plan、两个 implementer dispatch、acceptance、verification、code review、finish 和历史 run 保留。
 - record validation recovery：缺 artifact 的 gate 更新失败，随后附带 artifact 恢复。
 - completion verification gate：fresh verification 前拒绝 `done`，验证后接受。
 - active waiting reroute：等待态 workflow 保持当前 mode，不被新意图覆盖。
 - execute gate order：strict execute 下依次验证 plan gate 和 red-test gate。
-- prepare-review-start chain：先由 `sp_prepare` 进入 planner draft，再由 super-agent 审查计划、用户确认，最后 `sp_start` 进入 implement -> spec-review -> code-review -> verification -> finish 的完整节点链路。
+- prepare-review-start chain：先由 `sp_prepare` 创建 prepared run，用户确认后 `sp_start` 进入 implement -> acceptance -> verification -> code review -> finish 的完整节点链路。
 
 ## E2E Logging Contract
 
