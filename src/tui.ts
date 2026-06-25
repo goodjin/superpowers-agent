@@ -19,6 +19,7 @@ import {
   renderCompactProgressText,
   renderProgressPanelText,
   renderRunningSessionsText,
+  renderSidebarProgressText,
   renderWorkflowStatusText,
 } from "./tui/progress-panel"
 import type { WorkflowState } from "./state/types"
@@ -28,9 +29,11 @@ export const RESIDENT_PROGRESS_SLOT_NAMES = [
   "sidebar_content",
   "app_bottom",
   "session_prompt_right",
+  "home_prompt",
+  "home_prompt_right",
 ] as const
 
-type ProgressSlotRenderer = "compact" | "workflow-status" | "running-sessions"
+type ProgressSlotRenderer = "compact" | "workflow-status" | "running-sessions" | "sidebar"
 
 type TuiApi = {
   route: {
@@ -126,6 +129,7 @@ type CompactProgressSlotOptions = {
   questionClient?: QuestionBridgeClient
   maxChars?: number
   renderer?: ProgressSlotRenderer
+  allowGlobal?: boolean
 }
 
 export function createCompactProgressSlot(
@@ -145,28 +149,31 @@ export function createProgressSlot(
     const sessionID = slotSessionID(props)
     const refreshMs = options.refreshMs ?? 1000
     if (refreshMs <= 0) {
-      const text = safeProgressSlotText(api, sessionID, props, options.renderer ?? "compact", options.maxChars)
+      const text = safeProgressSlotText(api, sessionID, props, options.renderer ?? "compact", options.maxChars, options.allowGlobal)
       return text ? renderText(text) : null
     }
-    const [text, setText] = createSignal(safeProgressSlotText(api, sessionID, props, options.renderer ?? "compact", options.maxChars))
+    const [text, setText] = createSignal(safeProgressSlotText(api, sessionID, props, options.renderer ?? "compact", options.maxChars, options.allowGlobal))
     const timer = setInterval(() => {
-      void refreshProgressSlotText(api, sessionID, props, options.questionClient, options.renderer ?? "compact", options.maxChars, setText)
+      void refreshProgressSlotText(api, sessionID, props, options.questionClient, options.renderer ?? "compact", options.maxChars, options.allowGlobal, setText)
     }, refreshMs)
-    void refreshProgressSlotText(api, sessionID, props, options.questionClient, options.renderer ?? "compact", options.maxChars, setText)
+    void refreshProgressSlotText(api, sessionID, props, options.questionClient, options.renderer ?? "compact", options.maxChars, options.allowGlobal, setText)
     onCleanup(() => clearInterval(timer))
     return renderText(text)
   }
 }
 
-function progressSlotOptions(slotName: string): Pick<CompactProgressSlotOptions, "renderer" | "maxChars"> {
+function progressSlotOptions(slotName: string): Pick<CompactProgressSlotOptions, "renderer" | "maxChars" | "allowGlobal"> {
   switch (slotName) {
     case "app_bottom":
     case "sidebar_footer":
       return { renderer: "workflow-status", maxChars: 100 }
     case "sidebar_content":
-      return { renderer: "running-sessions" }
+      return { renderer: "sidebar", allowGlobal: true }
     case "session_prompt_right":
       return { renderer: "compact", maxChars: 44 }
+    case "home_prompt":
+    case "home_prompt_right":
+      return { renderer: "compact", maxChars: 80, allowGlobal: true }
     default:
       return { renderer: "compact" }
   }
@@ -182,14 +189,16 @@ function safeProgressSlotText(
   props: Record<string, unknown> | undefined,
   renderer: ProgressSlotRenderer,
   maxChars?: number,
+  allowGlobal = false,
 ): string {
   try {
     const state = currentWorkflowState(api)
     const progress = state ? createNodeProgressStore(api.state.path.directory).readRun(state) : {}
     const model = progressModel(api, state, progress, sessionID)
-    if (renderer !== "compact" && typeof slotSessionID(props) !== "string") return ""
+    if (!allowGlobal && renderer !== "compact" && typeof slotSessionID(props) !== "string") return ""
     if (renderer === "workflow-status") return renderWorkflowStatusText(model, maxChars)
     if (renderer === "running-sessions") return renderRunningSessionsText(model)
+    if (renderer === "sidebar") return renderSidebarProgressText(model)
     return renderCompactProgressText(model, maxChars)
   } catch {
     return "SP: progress unavailable"
@@ -203,19 +212,20 @@ async function refreshProgressSlotText(
   client: QuestionBridgeClient | undefined,
   renderer: ProgressSlotRenderer,
   maxChars: number | undefined,
+  allowGlobal: boolean | undefined,
   setText: (value: string) => void,
 ): Promise<void> {
   try {
     if (!client || renderer !== "compact") {
-      setText(safeProgressSlotText(api, sessionID, props, renderer, maxChars))
+      setText(safeProgressSlotText(api, sessionID, props, renderer, maxChars, allowGlobal))
       return
     }
     const state = currentWorkflowState(api)
     const questions = filterWorkflowQuestionRequests(state, await client.list(api.state.path.directory))
     const questionText = renderCompactQuestionText(questions)
-    setText(questionText || safeProgressSlotText(api, sessionID, props, renderer, maxChars))
+    setText(questionText || safeProgressSlotText(api, sessionID, props, renderer, maxChars, allowGlobal))
   } catch {
-    setText(safeProgressSlotText(api, sessionID, props, renderer, maxChars))
+    setText(safeProgressSlotText(api, sessionID, props, renderer, maxChars, allowGlobal))
   }
 }
 

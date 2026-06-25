@@ -137,6 +137,34 @@ export function renderRunningSessionsText(model: ProgressPanelViewModel, maxRows
   ].filter(Boolean).join("\n")
 }
 
+export function renderSidebarProgressText(model: ProgressPanelViewModel, maxRows = 6): string {
+  if (!model.active) return ""
+  const lines = [renderWorkflowStatusText(model, 120)]
+  const running = model.rows.filter((row) => row.durable_status === "running")
+  if (running.length > 0) {
+    lines.push("running")
+    lines.push(...running.slice(0, maxRows).map(renderSidebarRow))
+    if (running.length > maxRows) lines.push(`+${running.length - maxRows} more`)
+    return lines.join("\n")
+  }
+
+  const latest = model.rows.at(-1)
+  if (latest) {
+    lines.push("latest")
+    lines.push(renderSidebarRow(latest))
+    return lines.join("\n")
+  }
+
+  lines.push("waiting for node dispatch")
+  return lines.join("\n")
+}
+
+function renderSidebarRow(row: ProgressPanelRow): string {
+  const task = row.task_id ? ` ${row.task_id}` : ""
+  const activity = row.activity_status === "stalled" ? " stalled" : ""
+  return `${row.agent}${task}: ${row.durable_status}/${row.live_status}${activity} - ${row.latest_summary}`
+}
+
 function truncateLine(value: string, max = 120): string {
   return value.length > max ? `${value.slice(0, max - 3)}...` : value
 }

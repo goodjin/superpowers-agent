@@ -4,6 +4,7 @@ import {
   renderCompactProgressText,
   renderProgressPanelText,
   renderRunningSessionsText,
+  renderSidebarProgressText,
   renderWorkflowStatusText,
 } from "../src/tui/progress-panel"
 import type { NodeProgressEntry } from "../src/progress/node-progress"
@@ -138,6 +139,11 @@ describe("progress panel view model", () => {
     expect(renderCompactProgressText(model, 44)).toBe("SP: sp-implementer T1 running/busy - bash...")
     expect(renderWorkflowStatusText(model)).toBe("SP: feature running@implement | tasks 0/2 done | sessions 1 running")
     expect(renderRunningSessionsText(model)).toContain("sp-implementer T1: busy - bash running")
+    expect(renderSidebarProgressText(model)).toBe([
+      "SP: feature running@implement | tasks 0/2 done | sessions 1 running",
+      "running",
+      "sp-implementer T1: running/busy - bash running",
+    ].join("\n"))
   })
 
   test("marks stale running child progress as stalled", () => {
@@ -192,5 +198,36 @@ describe("progress panel view model", () => {
     expect(model.rows[0]?.activity_status).toBe("stalled")
     expect(renderProgressPanelText(model)).toContain("status: running / busy / stalled")
     expect(renderCompactProgressText(model)).toBe("SP: sp-acceptance-reviewer running/busy/stalled - write pending")
+  })
+
+  test("sidebar progress explains an active workflow before node dispatch", () => {
+    const state: WorkflowState = {
+      id: "run-1",
+      project: "/repo",
+      session: "session-main",
+      parent_session_id: "session-main",
+      activation: "active",
+      workflow: "feature",
+      entrypoint: "feature",
+      limited_context: false,
+      mode: "design",
+      phase: "intake",
+      current_phase: "intake",
+      status: "intake",
+      goal: "Implement feature",
+      created_at: "2026-06-19T00:00:00.000Z",
+      updated_at: "2026-06-19T00:00:00.000Z",
+      gates: {},
+      artifacts: {},
+      node_runs: [],
+      history: [{ at: "2026-06-19T00:00:00.000Z", event: "created", to: "feature" }],
+    }
+
+    const model = buildProgressPanelViewModel(state, {}, {})
+
+    expect(renderSidebarProgressText(model)).toBe([
+      "SP: feature intake@intake | nodes 0 | sessions 0 running",
+      "waiting for node dispatch",
+    ].join("\n"))
   })
 })
