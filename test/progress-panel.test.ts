@@ -135,14 +135,14 @@ describe("progress panel view model", () => {
     expect(text).toContain("feature run run-1 is running at implement.")
     expect(text).toContain("001-implement-T1")
     expect(text).toContain("bash running")
-    expect(renderCompactProgressText(model)).toBe("SP: sp-implementer T1 running/busy - bash running")
-    expect(renderCompactProgressText(model, 44)).toBe("SP: sp-implementer T1 running/busy - bash...")
+    expect(renderCompactProgressText(model)).toBe("SP: sp-implementer T1 running - bash running")
+    expect(renderCompactProgressText(model, 44)).toBe("SP: sp-implementer T1 running - bash running")
     expect(renderWorkflowStatusText(model)).toBe("SP: feature running@implement | tasks 0/2 done | sessions 1 running")
-    expect(renderRunningSessionsText(model)).toContain("sp-implementer T1: busy - bash running")
+    expect(renderRunningSessionsText(model)).toContain("sp-implementer T1: running - bash running")
     expect(renderSidebarProgressText(model)).toBe([
       "SP: feature running@implement | tasks 0/2 done | sessions 1 running",
       "running",
-      "sp-implementer T1: running/busy - bash running",
+      "sp-implementer T1: running - bash running",
     ].join("\n"))
   })
 
@@ -196,9 +196,10 @@ describe("progress panel view model", () => {
     )
 
     expect(model.rows[0]?.activity_status).toBe("stalled")
-    expect(renderProgressPanelText(model)).toContain("status: running / busy / stalled")
-    expect(renderCompactProgressText(model)).toBe("SP: sp-acceptance-reviewer running/busy/stalled - write pending")
-    expect(renderWorkflowStatusText(model)).toBe("SP: feature running@implement | nodes 1 | sessions 1 running (1 stalled)")
+    expect(renderProgressPanelText(model)).toContain("status: stalled")
+    expect(renderProgressPanelText(model)).toContain("live: busy")
+    expect(renderCompactProgressText(model)).toBe("SP: sp-acceptance-reviewer stalled - write pending")
+    expect(renderWorkflowStatusText(model)).toBe("SP: feature running@implement | nodes 1 | sessions 1 stalled")
   })
 
   test("sidebar progress explains an active workflow before node dispatch", () => {

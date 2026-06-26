@@ -118,11 +118,11 @@ describe("Superpowers TUI plugin", () => {
       )
       expect(sidebarSlot()).toEqual({
         type: "text",
-        value: "SP: feature running@implement | tasks 0/1 done | sessions 1 running\nrunning\nsp-implementer T1: running/busy - bash running",
+        value: "SP: feature running@implement | tasks 0/1 done | sessions 1 running\nrunning\nsp-implementer T1: running - bash running",
       })
       expect(sidebarSlot(undefined, { session_id: "session-main" })).toEqual({
         type: "text",
-        value: "SP: feature running@implement | tasks 0/1 done | sessions 1 running\nrunning\nsp-implementer T1: running/busy - bash running",
+        value: "SP: feature running@implement | tasks 0/1 done | sessions 1 running\nrunning\nsp-implementer T1: running - bash running",
       })
       const compactSlot = createCompactProgressSlot(
         api,
@@ -131,19 +131,19 @@ describe("Superpowers TUI plugin", () => {
       )
       expect(compactSlot()).toEqual({
         type: "text",
-        value: "SP: sp-implementer T1 running/busy - bash running",
+        value: "SP: sp-implementer T1 running - bash running",
       })
       expect(compactSlot(undefined, { session_id: "session-main" })).toEqual({
         type: "text",
-        value: "SP: sp-implementer T1 running/busy - bash running",
+        value: "SP: sp-implementer T1 running - bash running",
       })
       expect(compactSlot(undefined, { session_id: "session-child" })).toEqual({
         type: "text",
-        value: "SP: sp-implementer T1 running/busy - bash running",
+        value: "SP: sp-implementer T1 running - bash running",
       })
       expect(compactSlot(undefined, { sessionID: "session-main" })).toEqual({
         type: "text",
-        value: "SP: sp-implementer T1 running/busy - bash running",
+        value: "SP: sp-implementer T1 running - bash running",
       })
       expect(compactSlot(undefined, { session_id: "session-other" })).toBeNull()
       const promptFallbackSlot = createCompactProgressSlot(
@@ -153,7 +153,7 @@ describe("Superpowers TUI plugin", () => {
       )
       expect(promptFallbackSlot()).toEqual({
         type: "text",
-        value: "SP: sp-implementer T1 running/busy - bash...",
+        value: "SP: sp-implementer T1 running - bash running",
       })
       commands.find((command) => command.value === "superpowers.progress")?.onSelect?.()
       expect(navigated).toEqual([{ name: "superpowers-progress", params: undefined }])
@@ -214,7 +214,7 @@ describe("Superpowers TUI plugin", () => {
 
       expect(compactSlot()).toEqual({
         type: "text",
-        value: "SP: sp-implementer T1 running/busy - assistant text updated",
+        value: "SP: sp-implementer T1 running - assistant text updated",
       })
     } finally {
       if (previousProject === undefined) {

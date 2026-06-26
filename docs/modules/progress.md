@@ -76,7 +76,7 @@ child question bridge route 名为 `superpowers-questions`，命令值为 `super
 
 详细过程仍通过 `superpowers-progress` route 查看；子会话问题的完整交互仍通过 `superpowers-questions` route 完成。
 
-running node 的最新 progress 如果超过显示阈值没有更新，会在 compact 行和完整面板里标为 `stalled`，例如 `SP: sp-acceptance-reviewer running/busy/stalled - write pending`。这表示 Controller 仍然有登记的 child session，但最近的 child progress 已经停住，需要用户能在主会话直接看到。
+running node 的最新 progress 如果超过显示阈值没有更新，会在 compact 行和完整面板里标为 `stalled`，例如 `SP: sp-acceptance-reviewer stalled - write pending`。`running` 和 `stalled` 是互斥展示状态：同一个 session 超时后只显示 `stalled`，不再把两个状态拼在一起。这表示 Controller 仍然有登记的 child session，但最近的 child progress 已经停住，需要用户能在主会话直接看到。
 
 slot render 必须返回 OpenTUI/Solid element，而不是裸字符串。TUI 入口会加载 `@opentui/solid/runtime-plugin-support`，再使用 `@opentui/solid` 创建 `text` element，并对 workflow/progress 读取异常做 fail-closed 处理；读取失败时只显示 `SP: progress unavailable`，避免异常进入 host TUI 渲染器。
 
