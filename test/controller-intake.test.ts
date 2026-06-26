@@ -248,6 +248,122 @@ describe("sp_prepare and sp_start tools", () => {
     }
   })
 
+  test("sp_start with execute entrypoint dispatches implementation instead of design", async () => {
+    const project = mkdtempSync(join(tmpdir(), "sp-start-execute-entrypoint-"))
+    try {
+      const store = createProjectStore(project)
+      const state = store.startRun({
+        workflow: "feature",
+        entrypoint: "execute",
+        goal: "Implement an approved task",
+        request: "# Request\n\nImplement the approved task.",
+        proposal: "# Proposal\n\nRun execution workflow.",
+        parentSessionID: "session-main",
+      })
+      const start = createStartTool(store, {
+        async dispatch(args) {
+          return {
+            action: args.decision.action,
+            session_id: "session-impl",
+            task_markdown: "# Implement task",
+          }
+        },
+      })
+
+      const output = await start.execute({ run_id: state.id }, toolContext)
+      const result = JSON.parse(toolOutput(output))
+
+      expect(result.dispatches).toEqual([
+        {
+          action: "create_session",
+          phase: "implement",
+          agent: "sp-implementer",
+          session_id: "session-impl",
+        },
+      ])
+      expect(store.readCurrent()?.node_runs.at(-1)).toMatchObject({
+        phase: "implement",
+        agent: "sp-implementer",
+      })
+    } finally {
+      rmSync(project, { recursive: true, force: true })
+    }
+  })
+
+  test("sp_prepare imports source workflow task graph and artifacts", async () => {
+    const project = mkdtempSync(join(tmpdir(), "sp-prepare-source-workflow-"))
+    try {
+      const store = createProjectStore(project)
+      const source = store.startRun({
+        workflow: "feature",
+        entrypoint: "feature",
+        goal: "Source workflow",
+        request: "# Request\n\nSource workflow.",
+        proposal: "# Proposal\n\nSource workflow.",
+        parentSessionID: "session-main",
+      })
+      store.recordNodeResult({
+        input: {
+          event: "plan",
+          status: "passed",
+          summary: "Plan ready.",
+          artifacts: { plan: "# Source Plan\n\nImplement source tasks." },
+          gates: { plan_written: true },
+          task_graph: {
+            tasks: [{ id: "T1", title: "Source task", summary: "Reuse this task graph.", depends_on: [] }],
+          },
+        },
+      })
+
+      const prepare = createPrepareTool(store, {
+        async dispatch() {
+          throw new Error("prepare must not dispatch")
+        },
+      })
+      const output = await prepare.execute(
+        {
+          task: "Continue from the source workflow.",
+          workflow: "feature",
+          entrypoint: "execute",
+          source_workflow_id: source.id,
+        },
+        toolContext,
+      )
+
+      const result = JSON.parse(toolOutput(output))
+      const current = store.readCurrent()
+      const runRoot = join(store.root, "runs", result.state.id)
+      expect(current?.task_graph?.tasks.map((task) => task.id)).toEqual(["T1"])
+      expect(current?.artifacts.plan).toBe("plan.md")
+      expect(readFileSync(join(runRoot, "artifacts", "plan.md"), "utf8")).toContain("Source Plan")
+      expect(readFileSync(join(runRoot, "tasks.json"), "utf8")).toContain("Source task")
+      expect(result.state.id).not.toBe(source.id)
+      expect(result.state.entrypoint).toBe("execute")
+
+      const start = createStartTool(store, {
+        async dispatch(args) {
+          return {
+            action: args.decision.action,
+            session_id: "session-source-impl",
+            task_markdown: "# Implement source task",
+          }
+        },
+      })
+      const started = JSON.parse(toolOutput(await start.execute({ run_id: result.state.id }, toolContext)))
+      expect(started.dispatches).toEqual([
+        {
+          action: "create_session",
+          phase: "implement",
+          agent: "sp-implementer",
+          task_id: "T1",
+          session_id: "session-source-impl",
+        },
+      ])
+    } finally {
+      rmSync(project, { recursive: true, force: true })
+    }
+  })
+
   test("sp_start resume preserves waiting-user workflows without dispatching", async () => {
     const project = mkdtempSync(join(tmpdir(), "sp-start-resume-waiting-"))
     try {

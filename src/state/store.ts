@@ -3,7 +3,7 @@ import { dirname, join } from "node:path"
 import { randomUUID } from "node:crypto"
 import { applyRecord, createInitialState } from "./transitions"
 import { normalizeTaskGraph } from "./task-graph"
-import type { NodeRun, WorkflowEntrypoint, WorkflowKind, WorkflowMode, WorkflowRecord, WorkflowState } from "./types"
+import type { NodeRun, WorkflowArtifact, WorkflowEntrypoint, WorkflowKind, WorkflowMode, WorkflowRecord, WorkflowState } from "./types"
 
 export type ProjectStore = {
   root: string
@@ -26,13 +26,14 @@ export type ProjectStore = {
     request: string
     proposal: string
     parentSessionID: string
+    sourceWorkflowID?: string
   }): WorkflowState
   activateRun(args: {
     runID: string
     parentSessionID: string
   }): WorkflowState
   record(record: WorkflowRecord): WorkflowState
-  recordNodeResult(args: { nodeID?: string; input: WorkflowRecord }): WorkflowState
+  recordNodeResult(args: { nodeID?: string; sessionID?: string; agent?: string; input: WorkflowRecord }): WorkflowState
   cancel(args: { runID?: string; taskID?: string; sessionID?: string; reason?: string }): WorkflowState
   addNodeRun(args: {
     phase: string
@@ -104,7 +105,7 @@ export function createProjectStore(project: string): ProjectStore {
       return state
     },
     prepareRun(args) {
-      const state = createWorkflowState({
+      let state = createWorkflowState({
         id: randomUUID(),
         project,
         workflow: args.workflow,
@@ -114,6 +115,15 @@ export function createProjectStore(project: string): ProjectStore {
         activation: "draft",
       })
       initializeRunRoot(runRootFor(root, state.id))
+      if (args.sourceWorkflowID) {
+        const source = this.readRun(args.sourceWorkflowID)
+        if (!source) throw new Error(`No Superpowers workflow found for source ${args.sourceWorkflowID}.`)
+        state = {
+          ...state,
+          task_graph: source.task_graph ? normalizeTaskGraph(source.task_graph) : undefined,
+          artifacts: copySourceArtifacts(root, source.id, state.id, source.artifacts),
+        }
+      }
       writeState(root, state)
       writeCurrent(root, state.id)
       writeRunMarkdown(root, state.id, "request.md", args.request)
@@ -168,7 +178,7 @@ export function createProjectStore(project: string): ProjectStore {
       if (!current) {
         throw new Error("No active Superpowers workflow. Call sp_start first.")
       }
-      const nodeID = args.nodeID ?? nextNodeID(current, args.input.event)
+      const nodeID = resolveNodeID(current, args)
       writeArtifacts(root, current.id, args.input.artifacts ?? {})
       writeNodeRecordByID(root, current.id, nodeID, args.input)
       writeReportForNode(root, current, nodeID, args.input)
@@ -401,6 +411,28 @@ function writeArtifacts(root: string, run: string, artifacts: NonNullable<Workfl
   }
 }
 
+function copySourceArtifacts(
+  root: string,
+  sourceRun: string,
+  targetRun: string,
+  artifacts: WorkflowState["artifacts"],
+): Partial<Record<WorkflowArtifact, string>> {
+  const refs: Partial<Record<WorkflowArtifact, string>> = {}
+  for (const [name, ref] of Object.entries(artifacts) as Array<[WorkflowArtifact, string]>) {
+    const sourcePath = join(root, "runs", sourceRun, "artifacts", ref)
+    if (!existsSync(sourcePath)) continue
+    const body = readFileSync(sourcePath, "utf8")
+    const targetRef = `${name}.md`
+    const targetPath = join(root, "runs", targetRun, "artifacts", targetRef)
+    mkdirSync(dirname(targetPath), { recursive: true })
+    writeFileSync(targetPath, body.endsWith("\n") ? body : `${body}\n`)
+    const flatName = flatArtifactFilename(name)
+    if (flatName) writeRunMarkdown(root, targetRun, flatName, body)
+    refs[name] = targetRef
+  }
+  return refs
+}
+
 function flatArtifactFilename(name: string): string | undefined {
   switch (name) {
     case "spec":
@@ -507,6 +539,60 @@ function nextNodeID(state: WorkflowState, event: string): string {
   if (running) return running.id
   const nodeIndex = state.history.filter((entry) => entry.event !== "created").length + 1
   return `${String(nodeIndex).padStart(3, "0")}-${event}`
+}
+
+function resolveNodeID(
+  state: WorkflowState,
+  args: { nodeID?: string; sessionID?: string; agent?: string; input: WorkflowRecord },
+): string {
+  if (args.nodeID) return args.nodeID
+  const running = state.node_runs.filter((run) => run.status === "running")
+  const eventPhase = phaseForRecordEvent(args.input.event)
+
+  if (args.sessionID) {
+    const sessionMatches = running.filter((run) => run.session_id === args.sessionID)
+    const resolved = resolveUniqueRunningNode(sessionMatches, eventPhase, args.agent)
+    if (resolved) return resolved.id
+    if (sessionMatches.length > 0) {
+      throw new Error(`sp_report rejected: multiple running nodes match session ${args.sessionID}; pass nodeID explicitly`)
+    }
+  }
+
+  const eventMatches = running.filter((run) => run.phase === eventPhase)
+  const eventResolved = resolveUniqueRunningNode(eventMatches, eventPhase, args.agent)
+  if (eventResolved) return eventResolved.id
+
+  if (running.length === 1) return running[0].id
+  if (running.length > 1) {
+    throw new Error("sp_report rejected: multiple running nodes are active; report with session context or explicit nodeID")
+  }
+
+  return nextNodeID(state, args.input.event)
+}
+
+function resolveUniqueRunningNode(nodes: NodeRun[], phase: string, agent?: string): NodeRun | undefined {
+  if (nodes.length === 1) return nodes[0]
+  if (nodes.length === 0) return undefined
+  const phaseMatches = nodes.filter((run) => run.phase === phase)
+  if (phaseMatches.length === 1) return phaseMatches[0]
+  if (agent) {
+    const agentMatches = phaseMatches.length > 0 ? phaseMatches.filter((run) => run.agent === agent) : nodes.filter((run) => run.agent === agent)
+    if (agentMatches.length === 1) return agentMatches[0]
+  }
+  return undefined
+}
+
+function phaseForRecordEvent(event: WorkflowRecord["event"]): string {
+  switch (event) {
+    case "implementation":
+      return "implement"
+    case "code-review":
+      return "code-review"
+    case "red-test":
+      return "red-test"
+    default:
+      return event
+  }
 }
 
 function nextDispatchNodeID(state: WorkflowState, phase: string, taskID: string | undefined, attempts: number): string {

@@ -143,6 +143,10 @@ function decideFromState(state: WorkflowState): DispatchDecision[] {
 }
 
 function dispatchEntrypoint(state: WorkflowState): DispatchDecision[] {
+  if (state.workflow === "feature" && state.entrypoint === "execute") {
+    return [create("implement", "sp-implementer", "execute entrypoint confirmed")]
+  }
+
   switch (state.workflow) {
     case "debug":
       return [create("debug", "sp-debugger", "debug workflow confirmed")]
@@ -212,7 +216,11 @@ function create(phase: string, agent: NodeAgentName, reason: string, taskID?: st
 }
 
 function latestTaskID(state: WorkflowState, phase: string): string | undefined {
-  return [...state.node_runs].reverse().find((run) => run.phase === phase && run.task_id)?.task_id
+  const runs = [...state.node_runs].reverse()
+  return (
+    runs.find((run) => run.phase === phase && run.task_id && run.status !== "running")?.task_id ??
+    runs.find((run) => run.phase === phase && run.task_id)?.task_id
+  )
 }
 
 function phaseForEvent(event: SpRecordInput["event"]): string {

@@ -104,6 +104,8 @@ state 模块负责 workflow run 的本地持久化、artifact/report 写入、ta
 
 `recordNodeResult()` 会把 matching node 从 `running` 更新成 `passed`、`failed`、`blocked` 或 `needs_user`；`progress` 只更新 `reported_at`，不会关闭 session run。记录会写入 `nodes/<node-id>/record.json`、`output.md` 和 `reports/<task-id>/...`。
 
+matching node 的归属顺序是：显式 `nodeID`、child `sessionID`、event phase/agent 的唯一 running match、单一 running node fallback。如果仍有多个 running node，runtime 应拒绝猜测，避免并行任务的 report 写到错误 node。
+
 `addNodeRun()` 是 runtime 确认派发新节点后的恢复点。只要 workflow 还没有 `passed` 或 `canceled`，新增 node run 会把 workflow `status` 设回 `running`，并把 `phase/current_phase` 更新为新节点 phase。这样 acceptance、verification 或 code review 失败后触发 retry implementer 时，UI 不会继续停留在 failed 状态。
 
 `node_runs` 是执行事实来源：

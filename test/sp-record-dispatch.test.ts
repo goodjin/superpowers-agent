@@ -306,6 +306,92 @@ describe("sp_report dispatch integration", () => {
     }
   })
 
+  test("parallel implementation report completes the node matching the reporting session", async () => {
+    const project = mkdtempSync(join(tmpdir(), "sp-record-parallel-session-"))
+    try {
+      const store = createProjectStore(project)
+      store.startRun({
+        workflow: "feature",
+        entrypoint: "feature",
+        goal: "Add parallel tasks",
+        request: "# Request",
+        proposal: "# Proposal",
+        parentSessionID: "session-main",
+      })
+      store.record({
+        event: "plan",
+        status: "passed",
+        summary: "Plan ready.",
+        artifacts: { plan: "# Plan" },
+        gates: { plan_written: true },
+        task_graph: {
+          tasks: [
+            { id: "T1", title: "Types", summary: "Add types", depends_on: [] },
+            { id: "T2", title: "Store", summary: "Add store", depends_on: [] },
+          ],
+        },
+      })
+      const task1 = store.addNodeRun({
+        phase: "implement",
+        agent: "sp-implementer",
+        primary_skill: "superpowers-test-driven-development",
+        session_id: "session-impl-T1",
+        task_id: "T1",
+        task_markdown: "# Task\n\nImplement T1.",
+      })
+      const task2 = store.addNodeRun({
+        phase: "implement",
+        agent: "sp-implementer",
+        primary_skill: "superpowers-test-driven-development",
+        session_id: "session-impl-T2",
+        task_id: "T2",
+        task_markdown: "# Task\n\nImplement T2.",
+      })
+
+      const handler = createReportHandler({
+        store,
+        orchestrator: {
+          async dispatch(args) {
+            return {
+              action: args.decision.action,
+              session_id: "session-acceptance-T1",
+              task_markdown: buildNodeTaskPrompt(args.packet),
+            }
+          },
+        },
+      })
+
+      const output = await handler(
+        {
+          event: "implementation",
+          status: "passed",
+          summary: "Implemented T1.",
+          artifacts: { patch_summary: "Patch for T1." },
+          gates: { implementation_done: true },
+        },
+        { sessionID: "session-impl-T1", agent: "sp-implementer" },
+      )
+
+      const result = JSON.parse(output)
+      const state = store.readCurrent()
+      expect(state?.node_runs.find((run) => run.id === task1.id)).toMatchObject({
+        task_id: "T1",
+        status: "passed",
+      })
+      expect(state?.node_runs.find((run) => run.id === task2.id)).toMatchObject({
+        task_id: "T2",
+        status: "running",
+      })
+      expect(result.dispatches[0]).toMatchObject({
+        agent: "sp-acceptance-reviewer",
+        phase: "acceptance",
+        task_id: "T1",
+      })
+    } finally {
+      rmSync(project, { recursive: true, force: true })
+    }
+  })
+
   test("failed check dispatches retry implementer and restores workflow to running", async () => {
     const project = mkdtempSync(join(tmpdir(), "sp-record-retry-"))
     try {

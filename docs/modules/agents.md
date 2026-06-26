@@ -50,7 +50,7 @@ agent prompt 不能成为 workflow state machine。职责边界如下：
 - planner 可以提交 `task_graph`，但 runtime 负责校验依赖、共享写文件隐式依赖和 runnable task。
 - implementer、reviewer、verifier 和 finisher 不能把 UI progress、Todo 状态或口头完成声明当成 gate；gate 必须通过 `sp_report` 的结构化字段和 artifacts 落盘。
 
-`entrypoint` 只影响 run 的初始入口或用户确认的恢复意图。已有 active run 的下一步由 durable state、`node_runs`、task graph 和 transition 规则决定，不能只因为 `entrypoint=implement` 就重新派发 designer/planner 或 implementer。
+`entrypoint` 只影响 run 的初始入口或用户确认的恢复意图。已有 active run 的下一步由 durable state、`node_runs`、task graph 和 transition 规则决定，不能只因为 `entrypoint=implement` 就重新派发 designer/planner 或 implementer。新 feature run 使用 `entrypoint=execute` 且没有更具体 durable state 时，入口 agent 是 `sp-implementer`。
 
 ## Skill Boundary
 

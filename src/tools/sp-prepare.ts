@@ -41,7 +41,10 @@ export function createPrepareTool(
         proposal: args.proposal ?? buildPreparedProposal({ request, workflow, sourceWorkflowID: args.source_workflow_id }),
         parentSessionID: args.session ?? context.sessionID,
       })
-      const state = store.prepareRun(start)
+      const state = store.prepareRun({
+        ...start,
+        sourceWorkflowID: args.source_workflow_id,
+      })
       await progress.report({
         stage: "run_started",
         title: "Superpowers workflow",

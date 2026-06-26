@@ -21,6 +21,8 @@ export function createReportHandler(deps: {
     const record = parseSpRecordInput(input)
     const state = deps.store.recordNodeResult({
       input: record,
+      sessionID: context.sessionID,
+      agent: context.agent,
     })
     const decisions = decideNextDispatches(state, record)
     const dispatches = []

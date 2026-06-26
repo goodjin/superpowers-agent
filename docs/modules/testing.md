@@ -11,11 +11,11 @@
 - `test/support/opencode-e2e/harness.ts`：真实 OpenCode e2e 的隔离环境、临时配置、mock LLM、child process 和 workflow state 读取工具。
 - `test/support/opencode-e2e/logging.ts`：e2e 场景日志 helper，统一输出 suite goal、scenario description、step、verification 和 summary。
 - `test/support/opencode-e2e/harness.test.ts`：harness smoke，以及 `node_runs` / `nodes/*` 读取能力验证。
-- `test/controller-intake.test.ts`：proposal 生成、resume proposal、`sp_prepare` 创建 prepared run、`sp_start` 激活 prepared run 或直接创建 run。
+- `test/controller-intake.test.ts`：proposal 生成、resume proposal、`sp_prepare` 创建 prepared run、source workflow 导入、`sp_start` 激活 prepared run 或直接创建 run，以及 `entrypoint=execute` 的实现入口派发。
 - `test/dispatch-transition.test.ts`：intake、plan、task-scoped implementation acceptance、串行 review、code-review 后回到 task graph、retry 和 needs_user 的 dispatch decision。
 - `test/session-orchestrator.test.ts`：node task markdown 模板、session create/reuse adapter 调用。
 - `test/store-node-runs.test.ts`：`node_runs` 创建、`nodes/*/task.md`、`nodes/*/record.json` 和完成状态更新。
-- `test/sp-record-dispatch.test.ts`：legacy record handler 覆盖，验证 `sp_report(plan)` 语义后 dispatch implementer、implementation report 后派发带 task/report 上下文的 acceptance、检查失败后回派 implementer 并恢复 workflow running，并在 `needs_user` 时不派发。
+- `test/sp-record-dispatch.test.ts`：legacy record handler 覆盖，验证 `sp_report(plan)` 语义后 dispatch implementer、implementation report 后派发带 task/report 上下文的 acceptance、并行 implementation report 按 child session 归属节点、检查失败后回派 implementer 并恢复 workflow running，并在 `needs_user` 时不派发。
 - `test/node-progress.test.ts`：child session 事件到节点 progress JSONL 的映射、忽略无关 session、错误摘要。
 - `test/progress-panel.test.ts`：TUI progress panel view-model 和文本渲染。
 - `test/plugin-progress-event.test.ts`：server plugin `event` hook 写入 child progress。
@@ -41,6 +41,7 @@ workflow progress 是 side-channel 行为，用单元测试验证，不要求 e2
 - 新 run 启动和已有 run 恢复应分别覆盖；已有 active run 的恢复应从 durable state 计算下一步。
 - `sp_start(run_id)` 激活 prepared run 时，如果已有 `task_graph` 且 phase 为 plan 完成态，应派发 runnable implementer；如果所有 graph task 已完成检查，应进入 finish/recovery，而不是重新派 designer/planner。
 - `sp_report(status: "progress")` 只更新记录和 progress，不触发 downstream dispatch。
+- 并行 running node 的 `sp_report` 必须按 child session 归属到正确 node，不能用最后一个 running node 兜底猜测。
 - `needs_user` 必须写入 `pending_question` 并停止派发。
 - 检查失败应优先复用对应 task 的 implementer session；无法复用时才创建新的 implementer。
 - `sp_cancel(session_id)` 后恢复时应读取 canceled/blocked node run，不应把整个 workflow 当成全新 run。
