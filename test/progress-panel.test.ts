@@ -198,6 +198,7 @@ describe("progress panel view model", () => {
     expect(model.rows[0]?.activity_status).toBe("stalled")
     expect(renderProgressPanelText(model)).toContain("status: running / busy / stalled")
     expect(renderCompactProgressText(model)).toBe("SP: sp-acceptance-reviewer running/busy/stalled - write pending")
+    expect(renderWorkflowStatusText(model)).toBe("SP: feature running@implement | nodes 1 | sessions 1 running (1 stalled)")
   })
 
   test("sidebar progress explains an active workflow before node dispatch", () => {

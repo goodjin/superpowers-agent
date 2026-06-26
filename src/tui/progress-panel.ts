@@ -118,7 +118,7 @@ export function renderWorkflowStatusText(model: ProgressPanelViewModel, max = 10
   const taskTotal = model.tasks.length
   const taskDone = model.tasks.filter((task) => task.status === "passed").length
   const taskSummary = taskTotal > 0 ? `tasks ${taskDone}/${taskTotal} done` : `nodes ${model.rows.length}`
-  const stalledText = stalled > 0 ? `, ${stalled} stalled` : ""
+  const stalledText = stalled > 0 ? ` (${stalled} stalled)` : ""
   return truncateLine(`SP: ${model.workflow} ${model.status}@${model.current_phase} | ${taskSummary} | sessions ${running} running${stalledText}`, max)
 }
 
