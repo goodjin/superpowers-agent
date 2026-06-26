@@ -401,31 +401,30 @@ describe("OpenCode 工作流 e2e", () => {
                 "3. Add retry and cancel action tests.",
               ].join("\n"),
             },
+            task_graph: {
+              tasks: [
+                {
+                  id: "T1",
+                  title: "Batch task run view",
+                  summary: "Implement grouped status rendering, retry handling, and regression tests.",
+                  depends_on: [],
+                  files: ["src/task-run-view.tsx", "test/task-run-view.test.ts"],
+                  test_commands: ["bun test task-run-view.test.ts"],
+                },
+              ],
+            },
           }),
           toolCall(requestId, "sp_report", {
             event: "implementation",
             status: "passed",
-            summary: "The state loading task added a failing test and implementation evidence.",
+            summary: "The batch task run view added failing tests and implementation evidence.",
             gates: {
               red_test_seen: true,
               implementation_done: true,
             },
             artifacts: {
-              red_test_log: "FAIL task-run-state.test.ts: loads queued and failed groups separately.",
-              patch_summary: "Implemented task run state loading.",
-            },
-          }),
-          toolCall(requestId, "sp_report", {
-            event: "implementation",
-            status: "passed",
-            summary: "The retry actions task added action tests and implementation evidence.",
-            gates: {
-              red_test_seen: true,
-              implementation_done: true,
-            },
-            artifacts: {
-              red_test_log: "FAIL task-run-actions.test.ts: retry button is disabled until task selection.",
-              patch_summary: "Implemented retry and cancel actions.",
+              red_test_log: "FAIL task-run-view.test.ts: retry button is disabled until task selection.",
+              patch_summary: "Implemented task run state loading, grouped rendering, retry and cancel actions.",
             },
           }),
           toolCall(requestId, "sp_report", {
@@ -483,9 +482,9 @@ describe("OpenCode 工作流 e2e", () => {
         expect(result.error).toBeUndefined()
         log.verify("OpenCode 已完成全部生命周期轮次并成功退出")
 
-        log.step("验证 mock 模型请求", "十轮调用应该消费同一个 request_id，且没有剩余预设响应")
+        log.step("验证 mock 模型请求", "九轮调用应该消费同一个 request_id，且没有剩余预设响应")
         const requests = await readLoggedMockRequests(log, harness)
-        expect(requests.map((request) => request.request_id)).toEqual(Array(10).fill(requestId))
+        expect(requests.map((request) => request.request_id)).toEqual(Array(9).fill(requestId))
         expect(await harness.mock.pending()).toEqual([])
         log.verify("全部生命周期预设响应已按顺序消费")
 
@@ -510,7 +509,6 @@ describe("OpenCode 工作流 e2e", () => {
           "design",
           "plan",
           "implementation",
-          "implementation",
           "acceptance",
           "verification",
           "code-review",
@@ -522,7 +520,7 @@ describe("OpenCode 工作流 e2e", () => {
         logLastArtifactSnapshots(log, harness, ["spec", "plan", "red_test_log", "verification_log"])
         expect(harness.readLastArtifact("spec")).toContain("Batch task run view")
         expect(harness.readLastArtifact("plan")).toContain("Implementation plan")
-        expect(harness.readLastArtifact("red_test_log")).toContain("FAIL task-run-actions.test.ts")
+        expect(harness.readLastArtifact("red_test_log")).toContain("FAIL task-run-view.test.ts")
         expect(harness.readLastArtifact("verification_log")).toContain("bun run test:e2e passed")
         log.verify("抽样检查的生命周期产物都包含预期证据")
       },

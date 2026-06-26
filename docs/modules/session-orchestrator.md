@@ -33,6 +33,30 @@ store 随后用这些信息创建 `node_runs`，并写入 `nodes/<node-id>/task.
 
 当 decision 是 `create_session` 时，orchestrator 还支持 `onSessionCreated` 回调。工具层会在这个回调里先注册 `node_runs`，再继续发送首条 child prompt。这样 child session 即使立刻调用 `sp_report`，state store 里也已经有对应节点，不会出现 report 先到、node_run 还没落盘的竞态。
 
+## Dispatch Decision Lifecycle
+
+session orchestrator 不决定 workflow 下一步。它只执行 transition 已经产出的 `DispatchDecision`：
+
+1. controller 或 report handler 读取 durable state。
+2. `src/router/transition.ts` 根据 state 和可选 record 生成 decision。
+3. session orchestrator 把 decision 转成 task packet。
+4. adapter 创建或复用 OpenCode child session。
+5. store 登记 `node_runs` 并写入 `nodes/<node-id>/task.md` / `reports/<task-id>/task.md`。
+6. adapter 向 child session 提交 node prompt。
+7. child session 结束时通过 `sp_report` 回到 state/transition 层。
+
+orchestrator 不解析 markdown、不检查 gates、不计算 runnable tasks，也不根据 agent 文本决定下一个节点。所有这些判断都必须留在 state/transition 层。
+
+## Decision Types
+
+- `create_session`：为 phase/agent/task 创建一个新 child session。常见于首次派发 design、plan、implementation 或检查节点。
+- `reuse_session`：复用已有 session，通常是 acceptance、verification 或 code-review failed 后，把失败上下文发回原 implementer。
+- `wait_user`：不创建 session，由 controller/super-agent 向用户收集选择或补充信息。
+- `blocked`：不创建 session，暴露阻塞原因。
+- `finish`：不创建 session。它表示 workflow 已 direct-complete，或 `sp-finisher` 已通过 `sp_report(event="finish", status="passed")` 交回最终结果。
+
+需要 `sp-finisher` 的 workflow 不应该返回 `finish` decision 来“隐式派发”收尾节点；它应该返回 `create_session`，并设置 `phase=finish`、`agent=sp-finisher`。如果 finish node 已创建但空跑、取消或 blocked，恢复时应重新派发 finish node 或进入 blocked recovery，而不是把 run 重新交给 entrypoint。
+
 ## Prompt Context
 
 `buildNodeTaskPacket()` 会把 transition decision 转成可审计的 prompt packet。除 objective 和 required artifacts 外，packet 可以携带 `context_sections`：
@@ -52,6 +76,18 @@ orchestrator 在每次 dispatch 时发送两类 progress：
 - `node_running`：节点 session 已创建或复用，task prompt 已提交。
 
 这些提示走 adapter 的 `showProgress()`，生产环境优先显示 TUI toast，缺失时写入 app log。
+
+progress 只描述 dispatch 过程。它不能替代 `node_runs`，也不能驱动 transition。即使 UI 显示 child session busy/idle/stalled，workflow 是否能继续仍以 `sp_report` 写入的结构化 record 为准。
+
+## Recovery Boundaries
+
+恢复时不要直接调用 orchestrator。正确入口是 `sp_start`、`sp_report` 或 `sp_cancel`：
+
+- `sp_start(run_id)` 用于用户确认恢复某个 prepared/active run。
+- `sp_report` 用于 child node 提交结果并触发 transition。
+- `sp_cancel` 用于显式取消 workflow/task/session。
+
+这些工具会先写 state，再交给 transition/orchestrator。绕过工具直接创建 session 会让 `node_runs`、progress、question bridge 和 TUI surface 失去同一个追踪源。
 
 ## E2E Behavior
 

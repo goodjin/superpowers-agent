@@ -24,18 +24,33 @@ agents 模块负责注入 Superpowers Controller 的 OpenCode agent 配置。`su
 | `sp-verifier` | `subagent` | 验证节点，重新运行验证命令并记录命令证据。 | `verify-finish` mode；完成声明、提交或交付前需要 fresh verification 时。 | `superpowers-verification-before-completion` |
 | `sp-finisher` | `subagent` | 收尾节点，只在验证通过后准备最终交付。 | workflow 已完成实现、审查和验证，需要决定交付、分支或清理动作时。 | `superpowers-finishing-a-development-branch` |
 
-## Workflow Modes
+## Agent Mode Mapping
 
-| Mode | Phase | Agent | Required gates | Next action |
+这张表只描述 OpenCode mode / primary agent 的映射，不是完整 workflow definition。完整 workflow chain、task graph policy、checks 和 aggregation 规则由 controller/transition 文档描述。
+
+| Mode | Initial phase | Primary agent | Typical report gates | Runtime role |
 |---|---|---|---|---|
 | `idle` | `clarify` | `super-agent` | 无 | 澄清意图、检测现有 workflow state，并在 dispatch 前请求用户确认。 |
-| `design` | `explore` | `sp-designer` | `request_confirmed`, `design_approved`, `spec_written` | 创建 design/spec artifact 并记录 design gates。 |
-| `plan` | `write-plan` | `sp-planner` | `request_confirmed`, `plan_written` | 写 implementation plan 和 task graph artifact。 |
-| `execute` | `run-task` | `sp-implementer` | `plan_written`, `red_test_seen`, `implementation_done` | 执行一个可运行任务，按 TDD 记录证据。 |
-| `debug` | `find-root-cause` | `sp-debugger` | `request_confirmed`, `root_cause_found` | 找到并记录 root cause，再进入修复。 |
-| `parallel-investigate` | `investigate` | `sp-investigator` | `request_confirmed` | 对一个独立问题域做只读调查。 |
-| `review` | `acceptance` | `sp-acceptance-reviewer` | `acceptance_passed`, `verification_fresh`, `code_review_passed` | 先 acceptance，再 verification，最后 code review。 |
-| `verify-finish` | `fresh-verification` | `sp-verifier` | `verification_fresh` | 运行 fresh verification；失败时回派实现节点。 |
+| `design` | `explore` | `sp-designer` | `design_approved`, `spec_written` | 创建 design/spec artifact 并记录 design gates。 |
+| `plan` | `write-plan` | `sp-planner` | `plan_written` | 写 implementation plan 和 task graph artifact。 |
+| `execute` | `run-task` | `sp-implementer` | `red_test_seen`, `implementation_done` | 执行一个可运行 task，按 TDD 记录证据。 |
+| `debug` | `find-root-cause` | `sp-debugger` | `root_cause_found` | 找到并记录 root cause，再让 runtime 决定是否进入修复。 |
+| `parallel-investigate` | `investigate` | `sp-investigator` | findings/report artifact | 对一个独立问题域做只读调查。 |
+| `review` | `acceptance` | `sp-acceptance-reviewer` | `acceptance_passed` | 执行 acceptance 节点；后续 verification/code-review 由 transition 派发。 |
+| `verify-finish` | `fresh-verification` | `sp-verifier` | `verification_fresh` | 运行 fresh verification；失败时由 transition 决定 repair path。 |
+
+## Runtime Authority Boundary
+
+agent prompt 不能成为 workflow state machine。职责边界如下：
+
+- `super-agent` 理解用户意图、调用 `sp_status` 读取状态、向用户确认 proposal/recovery action，然后调用 `sp_prepare`、`sp_start` 或 `sp_cancel`。
+- `super-agent` 可以解释 runtime 返回的 state 和 dispatches，但不能根据自然语言自行创建 child session 或跳过 transition。
+- 节点 agent 只读取 node task packet 中给出的 scope、artifacts 和 required outputs。
+- 节点 agent 结束当前节点时调用 `sp_report`。它不能在 report 里提交 `next_action`、`child_session_id`、`reuse_session_id` 或自造 workflow transition。
+- planner 可以提交 `task_graph`，但 runtime 负责校验依赖、共享写文件隐式依赖和 runnable task。
+- implementer、reviewer、verifier 和 finisher 不能把 UI progress、Todo 状态或口头完成声明当成 gate；gate 必须通过 `sp_report` 的结构化字段和 artifacts 落盘。
+
+`entrypoint` 只影响 run 的初始入口或用户确认的恢复意图。已有 active run 的下一步由 durable state、`node_runs`、task graph 和 transition 规则决定，不能只因为 `entrypoint=implement` 就重新派发 designer/planner 或 implementer。
 
 ## Skill Boundary
 
