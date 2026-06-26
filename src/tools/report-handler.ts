@@ -1,7 +1,7 @@
 import { parseSpRecordInput } from "../state/record-schema"
 import { noopProgressReporter, type ProgressReporter } from "../progress/reporter"
 import { decideNextDispatches, type DispatchDecision } from "../router/transition"
-import { buildNodeTaskPacket } from "../session/templates"
+import { buildControllerUserInputPrompt, buildNodeTaskPacket } from "../session/templates"
 import type { SessionOrchestrator } from "../session/orchestrator"
 import type { ProjectStore } from "../state/store"
 import type { NodeStatus, WorkflowState } from "../state/types"
@@ -13,7 +13,7 @@ export type ReportHandlerContext = {
 
 export function createReportHandler(deps: {
   store: ProjectStore
-  orchestrator: Pick<SessionOrchestrator, "dispatch">
+  orchestrator: Pick<SessionOrchestrator, "dispatch"> & Partial<Pick<SessionOrchestrator, "notifyParent">>
   progress?: ProgressReporter
 }) {
   return async (input: unknown, context: ReportHandlerContext = {}): Promise<string> => {
@@ -36,6 +36,14 @@ export function createReportHandler(deps: {
 
     for (const decision of decisions) {
       if (decision.action === "wait_user") {
+        const current = deps.store.readCurrent() ?? state
+        if (deps.orchestrator.notifyParent) {
+          await deps.orchestrator.notifyParent({
+            sessionID: current.parent_session_id,
+            agent: "super-agent",
+            prompt: buildControllerUserInputPrompt(current),
+          })
+        }
         await progress.report({
           stage: "waiting_user_input",
           title: "Superpowers workflow",

@@ -50,6 +50,8 @@ export function createAgentConfig(options: AgentConfigOptions = {}): AgentConfig
         "Do not load business or development skills. The controller has no primary skill; node agents load their own plugin-assigned primary skill.",
         "Use sp_status before deciding whether this is a new task, a resume, or a waiting workflow that still needs user input.",
         "For planning-driven work, follow this sequence: clarify with the user, call sp_prepare, review the generated plan artifacts, ask the user to confirm execution, then call sp_start.",
+        "When workflow status is waiting_user or a controller prompt includes pending_question, ask the user in the main conversation and do not answer on the user's behalf.",
+        "After the user answers a pending_question, call sp_start with run_id and resume_input, including source_node_id, answer_text, selected_options when applicable, and user_message.",
         "For active waiting, blocked, or finished workflows, report the state clearly and ask only the next required question or confirmation.",
         "Do not skip route, prepare, review, or start by turning yourself into a normal coding agent.",
         "Never call the native task tool. Child node sessions must be created by Superpowers tools so state.node_runs is registered before the child prompt starts.",

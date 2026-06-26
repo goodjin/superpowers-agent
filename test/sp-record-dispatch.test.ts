@@ -89,13 +89,17 @@ describe("sp_report dispatch integration", () => {
       })
 
       const progress: Array<{ stage: string; message: string }> = []
+      const notifications: Array<{ sessionID: string; agent: string; prompt: string }> = []
       const handler = createReportHandler({
         store,
         orchestrator: {
           async dispatch() {
             throw new Error("unexpected dispatch")
           },
-        },
+          async notifyParent(input: { sessionID: string; agent: string; prompt: string }) {
+            notifications.push(input)
+          },
+        } as never,
         progress: {
           async report(input) {
             progress.push({ stage: input.stage, message: input.message })
@@ -126,6 +130,13 @@ describe("sp_report dispatch integration", () => {
         { label: "yes", description: "Use strict gates." },
         { label: "no", description: "Keep the current gate policy." },
       ])
+      expect(notifications).toHaveLength(1)
+      expect(notifications[0].sessionID).toBe("session-main")
+      expect(notifications[0].agent).toBe("super-agent")
+      expect(notifications[0].prompt).toContain("waiting for user input")
+      expect(notifications[0].prompt).toContain("Use strict gates?")
+      expect(notifications[0].prompt).toContain("sp_start")
+      expect(notifications[0].prompt).toContain("resume_input")
       expect(progress).toEqual([
         {
           stage: "node_recorded",

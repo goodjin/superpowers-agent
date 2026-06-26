@@ -1,5 +1,5 @@
 import type { DispatchDecision } from "../router/transition"
-import type { WorkflowState } from "../state/types"
+import type { NodeRun, ResumeInput, WorkflowState } from "../state/types"
 import type { NodeTaskPacket } from "./task-packet"
 
 export function buildNodeTaskPrompt(packet: NodeTaskPacket): string {
@@ -35,6 +35,85 @@ export function buildNodeTaskPrompt(packet: NodeTaskPacket): string {
     "- Optional fields: artifacts, gates, checks, findings, question, task_graph",
     '- question.options uses objects: [{ "label": "...", "description": "..." }].',
     "- Do not include next_action, target_session_id, child_session_id, reuse_session_id, create_sessions, or skills_used.",
+  ]
+    .filter(Boolean)
+    .join("\n")
+}
+
+export function buildControllerUserInputPrompt(state: WorkflowState): string {
+  const question = state.pending_question
+  if (!question) {
+    return [
+      "# Superpowers workflow waiting for user input",
+      "",
+      `Run: ${state.id}`,
+      "",
+      "The workflow is marked waiting_user, but no pending_question is available. Call sp_status and report the inconsistency to the user.",
+    ].join("\n")
+  }
+  return [
+    "# Superpowers workflow waiting for user input",
+    "",
+    `Run: ${state.id}`,
+    `Workflow: ${state.workflow}`,
+    `Phase: ${state.current_phase}`,
+    `Source node: ${question.source_node_id ?? "unknown"}`,
+    "",
+    "Ask the user this pending_question in the main conversation. Do not answer it yourself.",
+    "",
+    "## Question",
+    question.prompt,
+    "",
+    question.options?.length ? "## Options" : "",
+    question.options?.map((option) => `- ${option.label}${option.description ? `: ${option.description}` : ""}`).join("\n") ?? "",
+    question.options?.length ? "" : "",
+    "After the user answers, call sp_start with this run_id and resume_input. Use free-form user text when the answer is not a simple option.",
+    "",
+    "```json",
+    JSON.stringify({
+      run_id: state.id,
+      resume_input: {
+        source_node_id: question.source_node_id,
+        answer_text: "<user answer>",
+        selected_options: ["<optional selected option label>"],
+        user_message: "<original user reply>",
+      },
+    }, null, 2),
+    "```",
+  ]
+    .filter((line) => line !== undefined)
+    .join("\n")
+}
+
+export function buildChildResumePrompt(args: {
+  state: WorkflowState
+  node: NodeRun
+  resumeInput: ResumeInput
+  pendingQuestion: WorkflowState["pending_question"]
+}): string {
+  return [
+    "# Superpowers User Input Resume",
+    "",
+    `Run: ${args.state.id}`,
+    `Node: ${args.node.id}`,
+    `Phase: ${args.node.phase}`,
+    args.node.task_id ? `Task: ${args.node.task_id}` : "",
+    "",
+    "The parent controller session collected user input for your pending question. Continue the same node work using this answer.",
+    "",
+    "## Pending Question",
+    args.pendingQuestion?.prompt ?? "(question unavailable)",
+    "",
+    args.pendingQuestion?.options?.length ? "## Original Options" : "",
+    args.pendingQuestion?.options?.map((option) => `- ${option.label}${option.description ? `: ${option.description}` : ""}`).join("\n") ?? "",
+    args.pendingQuestion?.options?.length ? "" : "",
+    "## User Answer",
+    args.resumeInput.answer_text ?? args.resumeInput.user_message ?? JSON.stringify(args.resumeInput),
+    "",
+    args.resumeInput.selected_options?.length ? "Selected options:" : "",
+    args.resumeInput.selected_options?.map((option) => `- ${option}`).join("\n") ?? "",
+    args.resumeInput.selected_options?.length ? "" : "",
+    "When this node is complete or blocked, call sp_report with the normal event, status, summary, artifacts, gates, checks, findings, question, or task_graph as relevant.",
   ]
     .filter(Boolean)
     .join("\n")

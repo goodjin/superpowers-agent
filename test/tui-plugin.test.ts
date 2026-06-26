@@ -81,9 +81,10 @@ describe("Superpowers TUI plugin", () => {
         { id: "superpowers-controller", source: "file", spec: "", target: "", first_time: 0, last_time: 0, time_changed: 0, load_count: 1, fingerprint: "", state: "first" },
       )
 
-      expect(routes.map((route) => route.name).sort()).toEqual(["superpowers-progress", "superpowers-questions"])
+      expect(routes.map((route) => route.name).sort()).toEqual(["superpowers-progress"])
       expect(String(routes[0]?.render())).toContain("Superpowers Progress")
-      expect(commands.map((command) => command.value).sort()).toEqual(["superpowers.progress", "superpowers.questions"])
+      expect(commands.map((command) => command.value).sort()).toEqual(["superpowers.progress"])
+      expect(commands.map((command) => command.value)).not.toContain("superpowers.questions")
       expect(Object.keys(slots).sort()).toEqual([...RESIDENT_PROGRESS_SLOT_NAMES].sort())
       expect(typeof slots.sidebar_footer).toBe("function")
       expect(typeof slots.sidebar_content).toBe("function")

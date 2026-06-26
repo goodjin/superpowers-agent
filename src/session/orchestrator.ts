@@ -9,6 +9,11 @@ export type SessionDispatchResult = {
   task_markdown: string
 }
 
+export type SessionResumeResult = {
+  action: "resume_session"
+  session_id: string
+}
+
 export type SessionOrchestrator = ReturnType<typeof createSessionOrchestrator>
 
 export function createSessionOrchestrator(adapter: SessionAdapter) {
@@ -74,6 +79,44 @@ export function createSessionOrchestrator(adapter: SessionAdapter) {
         session_id: sessionID,
         task_markdown: taskMarkdown,
       }
+    },
+    async resumeNode(args: {
+      sessionID: string
+      agent: string
+      prompt: string
+    }): Promise<SessionResumeResult> {
+      await adapter.continueNodeSession({
+        sessionID: args.sessionID,
+        agent: args.agent,
+        prompt: args.prompt,
+      })
+      await adapter.showProgress({
+        stage: "node_resumed",
+        title: "Superpowers dispatch",
+        message: `Resumed ${args.agent} in ${args.sessionID}.`,
+        variant: "info",
+      })
+      return {
+        action: "resume_session",
+        session_id: args.sessionID,
+      }
+    },
+    async notifyParent(args: {
+      sessionID: string
+      agent: string
+      prompt: string
+    }): Promise<void> {
+      await adapter.continueNodeSession({
+        sessionID: args.sessionID,
+        agent: args.agent,
+        prompt: args.prompt,
+      })
+      await adapter.showProgress({
+        stage: "parent_notified",
+        title: "Superpowers workflow",
+        message: "Notified controller session about pending user input.",
+        variant: "warning",
+      })
     },
   }
 }

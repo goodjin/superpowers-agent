@@ -404,6 +404,142 @@ describe("sp_prepare and sp_start tools", () => {
     }
   })
 
+  test("sp_start resume_input clears pending question and resumes the waiting child session", async () => {
+    const project = mkdtempSync(join(tmpdir(), "sp-start-resume-input-"))
+    try {
+      const store = createProjectStore(project)
+      const state = store.startRun({
+        workflow: "feature",
+        entrypoint: "feature",
+        goal: "Add workflow gates",
+        request: "# Request\n\nAdd workflow gates.",
+        proposal: "# Proposal\n\nRun feature workflow.",
+        parentSessionID: "session-main",
+      })
+      const node = store.addNodeRun({
+        phase: "design",
+        agent: "sp-designer",
+        primary_skill: "superpowers-brainstorming",
+        session_id: "session-design",
+        task_markdown: "# Design task",
+      })
+      store.recordNodeResult({
+        input: {
+          event: "design",
+          status: "needs_user",
+          summary: "Need user choice.",
+          question: {
+            prompt: "Use strict gates?",
+            options: [{ label: "Strict", description: "Block risky writes." }],
+          },
+        },
+        sessionID: "session-design",
+        agent: "sp-designer",
+      })
+      const resumed: Array<{ sessionID: string; agent: string; prompt: string }> = []
+      const start = createStartTool(store, {
+        async dispatch() {
+          throw new Error("unexpected dispatch")
+        },
+        async resumeNode(input: { sessionID: string; agent: string; prompt: string }) {
+          resumed.push(input)
+          return {
+            action: "resume_session" as const,
+            session_id: input.sessionID,
+          }
+        },
+      } as never)
+
+      const output = await start.execute(
+        {
+          run_id: state.id,
+          resume_input: {
+            source_node_id: node.id,
+            answer_text: "Use strict gates, but keep write prompts visible.",
+            selected_options: ["Strict"],
+            user_message: "Strict is fine, but keep prompts visible.",
+          },
+        },
+        toolContext,
+      )
+      const result = JSON.parse(toolOutput(output))
+
+      expect(result.state.status).toBe("running")
+      expect(result.state.current_phase).toBe("design")
+      expect(result.state.pending_question).toBeUndefined()
+      expect(result.dispatches).toEqual([
+        {
+          action: "resume_session",
+          phase: "design",
+          agent: "sp-designer",
+          task_id: undefined,
+          session_id: "session-design",
+        },
+      ])
+      expect(resumed).toHaveLength(1)
+      expect(resumed[0].sessionID).toBe("session-design")
+      expect(resumed[0].agent).toBe("sp-designer")
+      expect(resumed[0].prompt).toContain("Use strict gates?")
+      expect(resumed[0].prompt).toContain("Use strict gates, but keep write prompts visible.")
+      expect(resumed[0].prompt).toContain("sp_report")
+    } finally {
+      rmSync(project, { recursive: true, force: true })
+    }
+  })
+
+  test("sp_start resume_input rejects answers for a different pending question", async () => {
+    const project = mkdtempSync(join(tmpdir(), "sp-start-resume-input-mismatch-"))
+    try {
+      const store = createProjectStore(project)
+      const state = store.startRun({
+        workflow: "feature",
+        entrypoint: "feature",
+        goal: "Add workflow gates",
+        request: "# Request\n\nAdd workflow gates.",
+        proposal: "# Proposal\n\nRun feature workflow.",
+        parentSessionID: "session-main",
+      })
+      store.addNodeRun({
+        phase: "design",
+        agent: "sp-designer",
+        primary_skill: "superpowers-brainstorming",
+        session_id: "session-design",
+        task_markdown: "# Design task",
+      })
+      store.recordNodeResult({
+        input: {
+          event: "design",
+          status: "needs_user",
+          summary: "Need user choice.",
+          question: { prompt: "Use strict gates?" },
+        },
+        sessionID: "session-design",
+        agent: "sp-designer",
+      })
+      const start = createStartTool(store, {
+        async dispatch() {
+          throw new Error("unexpected dispatch")
+        },
+        async resumeNode() {
+          throw new Error("unexpected resume")
+        },
+      } as never)
+
+      await expect(start.execute(
+        {
+          run_id: state.id,
+          resume_input: {
+            source_node_id: "999-other",
+            answer_text: "Use strict gates.",
+          },
+        },
+        toolContext,
+      )).rejects.toThrow("does not match the pending question")
+    } finally {
+      rmSync(project, { recursive: true, force: true })
+    }
+  })
+
   test("sp_start resume does not duplicate an already running node", async () => {
     const project = mkdtempSync(join(tmpdir(), "sp-start-resume-running-"))
     try {

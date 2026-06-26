@@ -2,14 +2,16 @@ import { tool, type ToolDefinition } from "@opencode-ai/plugin/tool"
 import { prepareExplicitStartRun } from "../controller/intake"
 import { noopProgressReporter, type ProgressReporter } from "../progress/reporter"
 import { decideNextDispatches } from "../router/transition"
-import { buildNodeTaskPacket } from "../session/templates"
+import { buildChildResumePrompt, buildNodeTaskPacket } from "../session/templates"
 import type { SessionOrchestrator } from "../session/orchestrator"
 import type { ProjectStore } from "../state/store"
-import type { WorkflowEntrypoint, WorkflowKind } from "../state/types"
+import type { ResumeInput, WorkflowEntrypoint, WorkflowKind } from "../state/types"
+
+type StartOrchestrator = Pick<SessionOrchestrator, "dispatch"> & Partial<Pick<SessionOrchestrator, "resumeNode">>
 
 export function createStartTool(
   store: ProjectStore,
-  orchestrator?: Pick<SessionOrchestrator, "dispatch">,
+  orchestrator?: StartOrchestrator,
   progress: ProgressReporter = noopProgressReporter,
 ): ToolDefinition {
   return tool({
@@ -22,9 +24,62 @@ export function createStartTool(
       run_id: tool.schema.string().optional().describe("Prepared run id to activate after plan review"),
       task_id: tool.schema.string().optional().describe("Optional task id to resume when activating a prepared plan"),
       session: tool.schema.string().optional().describe("Controller session id"),
+      resume_input: tool.schema
+        .object({
+          source_node_id: tool.schema.string().describe("Node id that produced the current pending_question"),
+          answer_text: tool.schema.string().optional().describe("User answer as normalized free text"),
+          selected_options: tool.schema.array(tool.schema.string()).optional().describe("Selected option labels when the question offered options"),
+          user_message: tool.schema.string().optional().describe("Original user reply from the main conversation"),
+        })
+        .optional()
+        .describe("User input collected by the controller for a waiting_user workflow."),
     },
     async execute(args, context) {
       const sessionID = args.session ?? context.sessionID
+      if (args.resume_input) {
+        if (!args.run_id) throw new Error("sp_start resume_input requires run_id.")
+        if (!orchestrator?.resumeNode) throw new Error("sp_start resume_input requires a session orchestrator with resumeNode.")
+        const before = store.readRun(args.run_id)
+        const pendingQuestion = before?.pending_question
+        const resumed = store.consumePendingQuestion({
+          runID: args.run_id,
+          parentSessionID: sessionID,
+          resumeInput: args.resume_input as ResumeInput,
+        })
+        const prompt = buildChildResumePrompt({
+          state: resumed.state,
+          node: resumed.node,
+          resumeInput: args.resume_input as ResumeInput,
+          pendingQuestion,
+        })
+        const result = await orchestrator.resumeNode({
+          sessionID: resumed.node.session_id,
+          agent: resumed.node.agent,
+          prompt,
+        })
+        await progress.report({
+          stage: "run_resumed",
+          title: "Superpowers workflow",
+          message: `${resumed.state.workflow} workflow resumed from user input.`,
+          variant: "success",
+        })
+        return JSON.stringify(
+          {
+            state: store.readCurrent() ?? resumed.state,
+            dispatches: [
+              {
+                action: result.action,
+                phase: resumed.node.phase,
+                agent: resumed.node.agent,
+                task_id: resumed.node.task_id,
+                session_id: result.session_id,
+              },
+            ],
+          },
+          null,
+          2,
+        )
+      }
       let state
       let dispatches: Array<Record<string, string | undefined>> = []
       let startMode: "new" | "resume" = "new"

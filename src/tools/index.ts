@@ -10,7 +10,7 @@ import { createStartTool } from "./sp-start"
 
 export function createTools(
   store: ProjectStore,
-  orchestrator?: Pick<SessionOrchestrator, "dispatch">,
+  orchestrator?: Pick<SessionOrchestrator, "dispatch"> & Partial<Pick<SessionOrchestrator, "resumeNode" | "notifyParent">>,
   progress: ProgressReporter = noopProgressReporter,
 ): Record<string, ToolDefinition> {
   const dispatchFallback = orchestrator ?? {

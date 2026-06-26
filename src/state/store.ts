@@ -3,7 +3,7 @@ import { dirname, join } from "node:path"
 import { randomUUID } from "node:crypto"
 import { applyRecord, createInitialState } from "./transitions"
 import { normalizeTaskGraph } from "./task-graph"
-import type { NodeRun, WorkflowArtifact, WorkflowEntrypoint, WorkflowKind, WorkflowMode, WorkflowRecord, WorkflowState } from "./types"
+import type { NodeRun, ResumeInput, WorkflowArtifact, WorkflowEntrypoint, WorkflowKind, WorkflowMode, WorkflowRecord, WorkflowState } from "./types"
 
 export type ProjectStore = {
   root: string
@@ -32,6 +32,11 @@ export type ProjectStore = {
     runID: string
     parentSessionID: string
   }): WorkflowState
+  consumePendingQuestion(args: {
+    runID: string
+    parentSessionID?: string
+    resumeInput: ResumeInput
+  }): { state: WorkflowState; node: NodeRun }
   record(record: WorkflowRecord): WorkflowState
   recordNodeResult(args: { nodeID?: string; sessionID?: string; agent?: string; input: WorkflowRecord }): WorkflowState
   cancel(args: { runID?: string; taskID?: string; sessionID?: string; reason?: string }): WorkflowState
@@ -154,6 +159,64 @@ export function createProjectStore(project: string): ProjectStore {
       writeCurrent(root, next.id)
       appendChangelog(root, next.id, `activated ${next.workflow} workflow from ${next.entrypoint}`)
       return next
+    },
+    consumePendingQuestion(args) {
+      const current = this.readRun(args.runID)
+      if (!current) {
+        throw new Error(`No Superpowers workflow found for run ${args.runID}.`)
+      }
+      if (current.status !== "waiting_user" || !current.pending_question) {
+        throw new Error(`Superpowers workflow ${args.runID} is not waiting for user input.`)
+      }
+      const expectedNodeID = current.pending_question.source_node_id
+      if (!expectedNodeID) {
+        throw new Error(`Superpowers workflow ${args.runID} has a pending question without a source node.`)
+      }
+      if (args.resumeInput.source_node_id !== expectedNodeID) {
+        throw new Error(`resume_input source_node_id ${args.resumeInput.source_node_id} does not match the pending question ${expectedNodeID}.`)
+      }
+      const sourceNode = current.node_runs.find((node) => node.id === expectedNodeID)
+      if (!sourceNode) {
+        throw new Error(`No node run found for pending question source ${expectedNodeID}.`)
+      }
+      const now = new Date().toISOString()
+      const resumedNode: NodeRun = {
+        ...sourceNode,
+        status: "running",
+        closed_at: undefined,
+        ended_at: undefined,
+      }
+      const next: WorkflowState = {
+        ...current,
+        session: args.parentSessionID ?? current.session,
+        parent_session_id: args.parentSessionID ?? current.parent_session_id,
+        status: "running",
+        phase: sourceNode.phase,
+        current_phase: sourceNode.phase,
+        pending_question: undefined,
+        node_runs: current.node_runs.map((node) => node.id === sourceNode.id ? resumedNode : node),
+        updated_at: now,
+        history: [
+          ...current.history,
+          {
+            at: now,
+            event: "user_input_resumed",
+            from: "waiting-user",
+            to: sourceNode.phase,
+            summary: `Resumed ${sourceNode.id} with user input.`,
+          },
+        ],
+      }
+      writeState(root, next)
+      writeCurrent(root, next.id)
+      appendEvent(root, next.id, {
+        type: "user_input_resumed",
+        node_id: sourceNode.id,
+        session_id: sourceNode.session_id,
+        task_id: sourceNode.task_id,
+      })
+      appendChangelog(root, next.id, `resumed ${sourceNode.id} with user input`)
+      return { state: next, node: resumedNode }
     },
     record(record) {
       const current = this.readCurrent()

@@ -45,6 +45,7 @@ agent prompt 不能成为 workflow state machine。职责边界如下：
 
 - `super-agent` 理解用户意图、调用 `sp_status` 读取状态、向用户确认 proposal/recovery action，然后调用 `sp_prepare`、`sp_start` 或 `sp_cancel`。
 - `super-agent` 可以解释 runtime 返回的 state 和 dispatches，但不能根据自然语言自行创建 child session 或跳过 transition。
+- `super-agent` 收到 `waiting_user` / `pending_question` controller prompt 后，只负责在主会话里问用户；用户回答后调用 `sp_start(run_id, resume_input)`，不能替用户决定答案。
 - 节点 agent 只读取 node task packet 中给出的 scope、artifacts 和 required outputs。
 - 节点 agent 结束当前节点时调用 `sp_report`。它不能在 report 里提交 `next_action`、`child_session_id`、`reuse_session_id` 或自造 workflow transition。
 - planner 可以提交 `task_graph`，但 runtime 负责校验依赖、共享写文件隐式依赖和 runnable task。
@@ -60,7 +61,7 @@ agent prompt 不能成为 workflow state machine。职责边界如下：
 - 对 planning-driven workflow，`super-agent` 负责 `sp_status -> sp_prepare -> user confirm -> sp_start` 这一段控制链。
 - 节点 agent 保留 `skill` tool，但 `permission.skill` 只允许 router 分配的 primary skill，并拒绝其它全局 skill。
 - 节点 agent 也禁止嵌套调用原生 `task` tool，避免节点绕过 Controller 继续派生未登记子会话。
-- 节点 agent 禁止调用 OpenCode 原生 `question` tool，并通过 `permission.question = deny` 和 `tools.question = false` 隐藏入口。需要用户输入时只能调用 `sp_report`，使用 `status: "needs_user"` 和结构化 `question` 字段，让 workflow state、progress 和 TUI 使用同一条问题链路。
+- 节点 agent 禁止调用 OpenCode 原生 `question` tool，并通过 `permission.question = deny` 和 `tools.question = false` 隐藏入口。需要用户输入时只能调用 `sp_report`，使用 `status: "needs_user"` 和结构化 `question` 字段；runtime 负责写入 `pending_question`、通知主控会话，并等待 `sp_start(run_id, resume_input)` 恢复原 child session。
 - 节点 agent prompt 只声明一个 primary skill；需要其他 skill 时，由控制器创建或复用另一个节点 session。
 
 ## Permission Inheritance

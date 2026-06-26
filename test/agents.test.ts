@@ -48,9 +48,14 @@ describe("createAgentConfig", () => {
     expect((controller?.permission as { task?: string } | undefined)?.task).toBe("deny")
     expect((controller?.tools as { skill?: boolean } | undefined)?.skill).toBe(false)
     expect((controller?.tools as { task?: boolean } | undefined)?.task).toBe(false)
-    expect(String(controller?.prompt ?? "")).toContain("clarify with the user")
-    expect(String(controller?.prompt ?? "")).toContain("call sp_prepare")
-    expect(String(controller?.prompt ?? "")).toContain("Do not load business or development skills")
+      expect(String(controller?.prompt ?? "")).toContain("clarify with the user")
+      expect(String(controller?.prompt ?? "")).toContain("call sp_prepare")
+      expect(String(controller?.prompt ?? "")).toContain("waiting_user")
+      expect(String(controller?.prompt ?? "")).toContain("pending_question")
+      expect(String(controller?.prompt ?? "")).toContain("ask the user")
+      expect(String(controller?.prompt ?? "")).toContain("sp_start")
+      expect(String(controller?.prompt ?? "")).toContain("resume_input")
+      expect(String(controller?.prompt ?? "")).toContain("Do not load business or development skills")
   })
 
   test("inherits global allow permissions for controller and node agents", () => {

@@ -119,6 +119,14 @@ export type SpRecordInput = {
   task_graph?: TaskGraph
 }
 
+export type ResumeInput = {
+  source_node_id: string
+  answer_text?: string
+  selected_options?: string[]
+  user_message?: string
+  [key: string]: unknown
+}
+
 export type WorkflowState = {
   id: string
   project: string

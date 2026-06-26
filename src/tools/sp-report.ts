@@ -6,7 +6,7 @@ import type { ProjectStore } from "../state/store"
 
 export function createReportTool(
   store: ProjectStore,
-  orchestrator: Pick<SessionOrchestrator, "dispatch">,
+  orchestrator: Pick<SessionOrchestrator, "dispatch"> & Partial<Pick<SessionOrchestrator, "notifyParent">>,
   progress: ProgressReporter = noopProgressReporter,
 ): ToolDefinition {
   const handler = createReportHandler({ store, orchestrator, progress })
