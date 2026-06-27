@@ -144,12 +144,18 @@ function recommendedNext(
     }
   }
   const interrupted = blockingInterruptedNode(state)
-  if (state.status === "recovered_unknown" || interrupted) {
+  if (interrupted) {
     return {
       action: "retry_or_cancel_interrupted_task",
       reason: "Startup recovery marked a previously running node as interrupted.",
       task_id: interrupted?.task_id,
       node_id: interrupted?.id,
+    }
+  }
+  if (state.status === "recovered_unknown") {
+    return {
+      action: "resume_or_cancel_recovered_workflow",
+      reason: "Startup recovery found a workflow that was previously running; no live child session is assumed.",
     }
   }
   const stalled = sessions.find((session) => session.durable_status === "running" && session.activity_status === "stalled")

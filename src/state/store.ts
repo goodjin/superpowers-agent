@@ -52,7 +52,11 @@ export type ProjectStore = {
   reset(): void
 }
 
-export function createProjectStore(project: string): ProjectStore {
+export type ProjectStoreOptions = {
+  reconcileOnLoad?: boolean
+}
+
+export function createProjectStore(project: string, options: ProjectStoreOptions = {}): ProjectStore {
   const root = join(project, ".opencode", "superpowers")
   let loaded = false
   let currentRunID: string | undefined
@@ -72,6 +76,19 @@ export function createProjectStore(project: string): ProjectStore {
       if (!entry.isDirectory()) continue
       const state = readStateFromDisk(root, entry.name)
       if (state) runtimeRuns.set(state.id, state)
+    }
+    if (options.reconcileOnLoad && currentRunID) {
+      const current = runtimeRuns.get(currentRunID)
+      if (current) {
+        const reconciled = reconcileStartupState(current, {
+          reason: "Store loaded persisted state; previous running workflow state cannot be assumed live after startup.",
+        })
+        if (reconciled.changed) {
+          runtimeRuns.set(reconciled.state.id, reconciled.state)
+          writeState(root, reconciled.state)
+          appendStartupRecoveryEvidence(root, reconciled.state, reconciled, reconciled.reason)
+        }
+      }
     }
   }
 
@@ -190,42 +207,11 @@ export function createProjectStore(project: string): ProjectStore {
     recoverInterruptedRunningNodes(args) {
       const current = this.readCurrent()
       if (!current) return null
-      const interrupted = current.node_runs.filter((node) => node.status === "running")
-      if (interrupted.length === 0) return current
-      const now = new Date().toISOString()
-      const interruptedIDs = new Set(interrupted.map((node) => node.id))
-      const next: WorkflowState = {
-        ...current,
-        status: "recovered_unknown",
-        updated_at: now,
-        node_runs: current.node_runs.map((node) => {
-          if (!interruptedIDs.has(node.id)) return node
-          return {
-            ...node,
-            status: "interrupted" as const,
-            closed_at: now,
-            ended_at: now,
-          }
-        }),
-        history: [
-          ...current.history,
-          {
-            at: now,
-            event: "startup_recovered_interrupted_nodes",
-            from: current.phase,
-            to: current.phase,
-            summary: args.reason,
-          },
-        ],
-      }
-      persistCurrent(next)
-      appendEvent(root, next.id, {
-        type: "startup_recovered_interrupted_nodes",
-        node_ids: [...interruptedIDs],
-        reason: args.reason,
-      })
-      appendChangelog(root, next.id, `startup recovered interrupted nodes ${[...interruptedIDs].join(", ")}: ${args.reason}`)
-      return next
+      const reconciled = reconcileStartupState(current, args)
+      if (!reconciled.changed) return current
+      persistCurrent(reconciled.state)
+      appendStartupRecoveryEvidence(root, reconciled.state, reconciled, args.reason)
+      return reconciled.state
     },
     consumePendingQuestion(args) {
       const current = this.readRun(args.runID)
@@ -437,6 +423,83 @@ function readStateFromDisk(root: string, runID: string): WorkflowState | null {
   const statePath = join(root, "runs", runID, "state.json")
   if (!existsSync(statePath)) return null
   return JSON.parse(readFileSync(statePath, "utf8")) as WorkflowState
+}
+
+type StartupReconciliation = {
+  state: WorkflowState
+  changed: boolean
+  reason: string
+  interruptedIDs: string[]
+  recoveredWorkflowRunning: boolean
+}
+
+function reconcileStartupState(state: WorkflowState, args: { reason: string }): StartupReconciliation {
+  const interrupted = state.node_runs.filter((node) => node.status === "running")
+  const recoveredWorkflowRunning = state.activation === "active" && state.status === "running"
+  if (interrupted.length === 0 && !recoveredWorkflowRunning) {
+    return {
+      state,
+      changed: false,
+      reason: args.reason,
+      interruptedIDs: [],
+      recoveredWorkflowRunning: false,
+    }
+  }
+
+  const now = new Date().toISOString()
+  const interruptedIDs = new Set(interrupted.map((node) => node.id))
+  return {
+    state: {
+      ...state,
+      status: "recovered_unknown",
+      updated_at: now,
+      node_runs: state.node_runs.map((node) => {
+        if (!interruptedIDs.has(node.id)) return node
+        return {
+          ...node,
+          status: "interrupted" as const,
+          closed_at: now,
+          ended_at: now,
+        }
+      }),
+      history: [
+        ...state.history,
+        {
+          at: now,
+          event: interruptedIDs.size > 0 ? "startup_recovered_interrupted_nodes" : "startup_recovered_running_workflow",
+          from: state.phase,
+          to: state.phase,
+          summary: args.reason,
+        },
+      ],
+    },
+    changed: true,
+    reason: args.reason,
+    interruptedIDs: [...interruptedIDs],
+    recoveredWorkflowRunning,
+  }
+}
+
+function appendStartupRecoveryEvidence(
+  root: string,
+  state: WorkflowState,
+  reconciliation: StartupReconciliation,
+  reason: string,
+): void {
+  const eventType = reconciliation.interruptedIDs.length > 0
+    ? "startup_recovered_interrupted_nodes"
+    : "startup_recovered_running_workflow"
+  appendEvent(root, state.id, {
+    type: eventType,
+    node_ids: reconciliation.interruptedIDs,
+    workflow_status_recovered: reconciliation.recoveredWorkflowRunning,
+    reason,
+  })
+  if (reconciliation.interruptedIDs.length > 0) {
+    appendChangelog(root, state.id, `startup recovered interrupted nodes ${reconciliation.interruptedIDs.join(", ")}: ${reason}`)
+    return
+  }
+  appendChangelog(root, state.id, `startup recovered workflow running status: ${reason}`)
 }
 
 function resumableStatus(status: WorkflowState["status"]): WorkflowState["status"] {

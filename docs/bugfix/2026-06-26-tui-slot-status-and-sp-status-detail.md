@@ -230,3 +230,24 @@ bun run deploy:superagent
 - `sp_status` 新增 `detail`、`session_id`、`include_progress` 和 `progress_tail` 参数，输出分为 `runtime`、`durable`、`summary`、`sessions`、`task` 和 `recommended_next`。
 - `sp_status` 在工具上下文无法读取 OpenCode live session API 时，明确输出 `live.source = "unavailable_in_tool_context"`。
 - 新增 `src/status/workflow-status.ts` 统一组装 status detail，避免 `sp_status` 和 TUI 对 latest progress / stalled / interrupted 的判断分叉。
+
+## Follow-up: Startup Running Workflow Residue
+
+日期: 2026-06-27
+
+现场复查发现两个叠加原因：
+
+- Restarting the `superagent` TUI does not necessarily restart the background `opencode serve` process on port 5096. The listener must be checked separately with the deploy script or `lsof`.
+- The durable current run can have workflow-level `status: "running"` even when every `node_runs[]` entry is already terminal. Earlier startup recovery only converted `node_runs[].status === "running"` to `interrupted`, so a fresh TUI/store could still display the workflow as running after restart.
+
+Fix:
+
+- Plugin startup creates the project store with startup reconciliation enabled before exposing runtime memory.
+- TUI slot reads stay side-effect-free; they consume the reconciled durable snapshot written by plugin startup instead of interrupting active nodes during UI reads.
+- Reconciliation converts both persisted running child nodes and persisted active workflow-level `status === "running"` into `recovered_unknown`; draft prepared workflows remain unchanged because they still wait for explicit `sp_start`.
+- `sp_status` now recommends `resume_or_cancel_recovered_workflow` when startup recovery found only workflow-level running state without a blocking interrupted latest attempt.
+
+Additional verification:
+
+- `test/store.test.ts` covers fresh store loading of a workflow-level running snapshot with no running nodes.
+- `test/tools.test.ts` covers `sp_status` reporting `sessions.running = 0` and `summary.status = "recovered_unknown"` for that startup-recovered state.

@@ -16,7 +16,7 @@ const startupRecoveryProjects = new Set<string>()
 export function createPluginModule(): PluginModule {
   const server: Plugin = async (ctx) => {
     const config = loadConfig(ctx.directory)
-    const store = createProjectStore(ctx.directory)
+    const store = createProjectStore(ctx.directory, { reconcileOnLoad: true })
     if (!startupRecoveryProjects.has(ctx.directory)) {
       startupRecoveryProjects.add(ctx.directory)
       const recovered = store.recoverInterruptedRunningNodes({

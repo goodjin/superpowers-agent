@@ -211,6 +211,67 @@ describe("sp_status tool", () => {
       rmSync(project, { recursive: true, force: true })
     }
   })
+
+  test("reports startup-recovered workflow-level running state without live running sessions", async () => {
+    const project = mkdtempSync(join(tmpdir(), "sp-status-recovered-workflow-running-"))
+    try {
+      const store = createProjectStore(project)
+      store.startRun({
+        workflow: "feature",
+        entrypoint: "execute",
+        goal: "Resume after restart",
+        request: "# Request",
+        proposal: "# Proposal",
+        parentSessionID: "session-main",
+      })
+      const node = store.addNodeRun({
+        phase: "implement",
+        agent: "sp-implementer",
+        session_id: "session-impl",
+        task_id: "T1",
+        task_markdown: "Implement T1",
+      })
+      store.recordNodeResult({
+        nodeID: node.id,
+        input: {
+          event: "implementation",
+          status: "passed",
+          summary: "Implementation passed.",
+          artifacts: { patch_summary: "Done." },
+          gates: { implementation_done: true },
+        },
+      })
+      const restartedStore = createProjectStore(project, { reconcileOnLoad: true })
+      const status = createStatusTool(restartedStore)
+
+      const output = await status.execute(
+        {
+          detail: "sessions",
+        },
+        {
+          sessionID: "session-main",
+          messageID: "message-1",
+          agent: "super-agent",
+          directory: project,
+          worktree: project,
+          abort: new AbortController().signal,
+          metadata() {},
+          async ask() {},
+        },
+      )
+
+      const result = JSON.parse(toolOutput(output))
+      expect(result.source).toBe("runtime_memory")
+      expect(result.summary.status).toBe("recovered_unknown")
+      expect(result.summary.sessions.running).toBe(0)
+      expect(result.sessions.every((session: { durable_status: string }) => session.durable_status !== "running")).toBe(true)
+      expect(result.recommended_next).toMatchObject({
+        action: "resume_or_cancel_recovered_workflow",
+      })
+    } finally {
+      rmSync(project, { recursive: true, force: true })
+    }
+  })
 })
 
 describe("sp_report tool", () => {
