@@ -2,6 +2,7 @@ import { mkdtempSync, rmSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { describe, expect, test } from "bun:test"
+import { createNodeProgressStore } from "../src/progress/node-progress"
 import { createProjectStore } from "../src/state/store"
 import { createTools } from "../src/tools"
 import { createCancelTool } from "../src/tools/sp-cancel"
@@ -70,9 +71,142 @@ describe("sp_status tool", () => {
       )
 
       const result = JSON.parse(toolOutput(output))
-      expect(result.source).toBe("runtime_current")
+      expect(result.source).toBe("runtime_memory")
       expect(result.current.task_graph.tasks[0].id).toBe("T1")
       expect(result.task.task.id).toBe("T1")
+      expect(result.runtime.status_authority).toBe("runtime_memory")
+    } finally {
+      rmSync(project, { recursive: true, force: true })
+    }
+  })
+
+  test("returns session detail with progress while marking live status unavailable from tool context", async () => {
+    const project = mkdtempSync(join(tmpdir(), "sp-status-sessions-"))
+    try {
+      const store = createProjectStore(project)
+      const state = store.startRun({
+        workflow: "feature",
+        entrypoint: "execute",
+        goal: "Add workflow gates",
+        request: "# Request",
+        proposal: "# Proposal",
+        parentSessionID: "session-main",
+      })
+      const node = store.addNodeRun({
+        phase: "implement",
+        agent: "sp-implementer",
+        session_id: "session-child",
+        task_id: "T1",
+        task_markdown: "Implement T1",
+      })
+      createNodeProgressStore(project).append(state.id, {
+        at: new Date().toISOString(),
+        kind: "tool_running",
+        session_id: "session-child",
+        node_id: node.id,
+        agent: "sp-implementer",
+        phase: "implement",
+        task_id: "T1",
+        summary: "bash running",
+        detail: "bun test",
+      })
+      const status = createStatusTool(store)
+
+      const output = await status.execute(
+        {
+          detail: "sessions",
+          include_progress: true,
+          progress_tail: 1,
+          session_id: "session-child",
+        },
+        {
+          sessionID: "session-main",
+          messageID: "message-1",
+          agent: "super-agent",
+          directory: project,
+          worktree: project,
+          abort: new AbortController().signal,
+          metadata() {},
+          async ask() {},
+        },
+      )
+
+      const result = JSON.parse(toolOutput(output))
+      expect(result.source).toBe("runtime_memory")
+      expect(result.summary.sessions.running).toBe(1)
+      expect(result.sessions).toHaveLength(1)
+      expect(result.sessions[0]).toMatchObject({
+        node_id: node.id,
+        session_id: "session-child",
+        durable_status: "running",
+        latest_progress: {
+          kind: "tool_running",
+          summary: "bash running",
+        },
+        live: {
+          status: "unknown",
+          source: "unavailable_in_tool_context",
+        },
+      })
+      expect(result.sessions[0].progress_tail).toHaveLength(1)
+      expect(result.durable.role).toBe("snapshot")
+      expect(result.recommended_next.action).toBe("wait_running_node")
+    } finally {
+      rmSync(project, { recursive: true, force: true })
+    }
+  })
+
+  test("does not recommend retrying an interrupted attempt after a newer retry exists", async () => {
+    const project = mkdtempSync(join(tmpdir(), "sp-status-interrupted-retry-"))
+    try {
+      const store = createProjectStore(project)
+      store.startRun({
+        workflow: "feature",
+        entrypoint: "execute",
+        goal: "Retry task",
+        request: "# Request",
+        proposal: "# Proposal",
+        parentSessionID: "session-main",
+      })
+      store.addNodeRun({
+        phase: "implement",
+        agent: "sp-implementer",
+        session_id: "session-old",
+        task_id: "T3",
+        task_markdown: "Implement T3",
+      })
+      store.recoverInterruptedRunningNodes({ reason: "test restart" })
+      const retry = store.addNodeRun({
+        phase: "implement",
+        agent: "sp-implementer",
+        session_id: "session-new",
+        task_id: "T3",
+        task_markdown: "Retry T3",
+      })
+      const status = createStatusTool(store)
+
+      const output = await status.execute(
+        {
+          detail: "sessions",
+          session_id: "session-new",
+        },
+        {
+          sessionID: "session-main",
+          messageID: "message-1",
+          agent: "super-agent",
+          directory: project,
+          worktree: project,
+          abort: new AbortController().signal,
+          metadata() {},
+          async ask() {},
+        },
+      )
+
+      const result = JSON.parse(toolOutput(output))
+      expect(result.recommended_next).toMatchObject({
+        action: "wait_running_node",
+        node_id: retry.id,
+      })
     } finally {
       rmSync(project, { recursive: true, force: true })
     }

@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test"
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { createRoot, type Accessor } from "solid-js"
 import { createNodeProgressStore } from "../src/progress/node-progress"
 import { createProjectStore } from "../src/state/store"
 import type { WorkflowState } from "../src/state/types"
@@ -324,6 +325,14 @@ describe("Superpowers TUI plugin", () => {
         type: "text",
         value: "SP: feature running@implement | tasks 0/1 done | sessions 1 running\nrunning\nsp-implementer T1: running - session owned progress",
       })
+      expect(sidebarSlot({ session_id: "session-current-main" })).toEqual({
+        type: "text",
+        value: "SP: feature running@implement | tasks 0/1 done | sessions 1 running\nrunning\nsp-implementer T1: running - session owned progress",
+      })
+      expect(sidebarSlot({ session: { id: "session-current-main" } })).toEqual({
+        type: "text",
+        value: "SP: feature running@implement | tasks 0/1 done | sessions 1 running\nrunning\nsp-implementer T1: running - session owned progress",
+      })
       expect(sidebarSlot(undefined, { session_id: "session-other" })).toBeNull()
     } finally {
       restoreEnv("SUPERAGENT_PROJECT_DIR", previousSuperagentProject)
@@ -331,6 +340,74 @@ describe("Superpowers TUI plugin", () => {
       rmSync(newerUnrelatedProject, { recursive: true, force: true })
       rmSync(sessionProject, { recursive: true, force: true })
       rmSync(tuiDirectory, { recursive: true, force: true })
+    }
+  })
+
+  test("resident progress slots refresh progress files after initial render", async () => {
+    const project = mkdtempSync(join(tmpdir(), "sp-tui-refresh-"))
+    try {
+      const state = createWorkflowWithProgress({
+        project,
+        parentSessionID: "session-main",
+        childSessionID: "session-child",
+        summary: "initial progress",
+        updatedAt: "2026-06-26T02:00:00.000Z",
+      })
+      const node = state.node_runs[0]
+      if (!node) throw new Error("expected node")
+      const api = {
+        state: {
+          path: { directory: project },
+          session: {
+            status() {
+              return { type: "busy" }
+            },
+          },
+        },
+      } as never
+      let text: Accessor<string> | undefined
+
+      await new Promise<void>((resolve, reject) => {
+        createRoot((dispose) => {
+          try {
+            const slot = createProgressSlot(
+              api,
+              (value) => {
+                text = typeof value === "function" ? value : () => value
+                return { type: "text" }
+              },
+              { refreshMs: 5, renderer: "sidebar", allowGlobal: true },
+            )
+            slot(undefined, { session_id: "session-main" })
+            expect(text?.()).toContain("initial progress")
+            createNodeProgressStore(project).append(state.id, {
+              at: "2026-06-26T02:00:05.000Z",
+              kind: "tool_running",
+              session_id: "session-child",
+              node_id: node.id,
+              agent: node.agent,
+              phase: node.phase,
+              task_id: node.task_id,
+              summary: "refreshed progress",
+            })
+            setTimeout(() => {
+              try {
+                expect(text?.()).toContain("refreshed progress")
+                dispose()
+                resolve()
+              } catch (error) {
+                dispose()
+                reject(error)
+              }
+            }, 20)
+          } catch (error) {
+            dispose()
+            reject(error)
+          }
+        })
+      })
+    } finally {
+      rmSync(project, { recursive: true, force: true })
     }
   })
 })

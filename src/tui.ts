@@ -131,18 +131,19 @@ export function createProgressSlot(
   renderText: (value: TextSource) => unknown = createTextElement,
   options: CompactProgressSlotOptions = {},
 ): (_context?: unknown, props?: Record<string, unknown>) => unknown {
-  return (_context, props) => {
-    const sessionID = slotSessionID(props)
+  return (context, props) => {
+    const sessionID = slotSessionIDFromArgs(context, props)
+    const hasSession = typeof sessionID === "string"
     const refreshMs = options.refreshMs ?? 1000
     if (refreshMs <= 0) {
-      const text = safeProgressSlotText(api, sessionID, props, options.renderer ?? "compact", options.maxChars, options.allowGlobal)
+      const text = safeProgressSlotText(api, sessionID, hasSession, options.renderer ?? "compact", options.maxChars, options.allowGlobal)
       return text ? renderText(text) : null
     }
-    const [text, setText] = createSignal(safeProgressSlotText(api, sessionID, props, options.renderer ?? "compact", options.maxChars, options.allowGlobal))
+    const [text, setText] = createSignal(safeProgressSlotText(api, sessionID, hasSession, options.renderer ?? "compact", options.maxChars, options.allowGlobal))
     const timer = setInterval(() => {
-      setText(safeProgressSlotText(api, sessionID, props, options.renderer ?? "compact", options.maxChars, options.allowGlobal))
+      setText(safeProgressSlotText(api, sessionID, hasSession, options.renderer ?? "compact", options.maxChars, options.allowGlobal))
     }, refreshMs)
-    setText(safeProgressSlotText(api, sessionID, props, options.renderer ?? "compact", options.maxChars, options.allowGlobal))
+    setText(safeProgressSlotText(api, sessionID, hasSession, options.renderer ?? "compact", options.maxChars, options.allowGlobal))
     onCleanup(() => clearInterval(timer))
     return renderText(text)
   }
@@ -160,14 +161,23 @@ function progressSlotOptions(slotName: string): Pick<CompactProgressSlotOptions,
   }
 }
 
-function slotSessionID(props?: Record<string, unknown>): unknown {
-  return typeof props?.session_id === "string" ? props.session_id : props?.sessionID
+function slotSessionIDFromArgs(context?: unknown, props?: Record<string, unknown>): unknown {
+  return slotSessionID(props) ?? slotSessionID(context)
+}
+
+function slotSessionID(value?: unknown): unknown {
+  if (!isRecord(value)) return undefined
+  if (typeof value.session_id === "string") return value.session_id
+  if (typeof value.sessionID === "string") return value.sessionID
+  const session = value.session
+  if (isRecord(session) && typeof session.id === "string") return session.id
+  return undefined
 }
 
 function safeProgressSlotText(
   api: TuiApi,
   sessionID: unknown,
-  props: Record<string, unknown> | undefined,
+  hasSession: boolean,
   renderer: ProgressSlotRenderer,
   maxChars?: number,
   allowGlobal = false,
@@ -175,12 +185,12 @@ function safeProgressSlotText(
   try {
     const context = currentWorkflowContext(api, sessionID)
     if (!context.state) {
-      if (!allowGlobal && renderer !== "compact" && typeof slotSessionID(props) !== "string") return ""
+      if (!allowGlobal && renderer !== "compact" && !hasSession) return ""
       return truncateSlotText(context.diagnostic ?? "SP: no active workflow", maxChars)
     }
     const progress = createNodeProgressStore(context.project).readRun(context.state)
     const model = progressModel(api, context.state, progress, sessionID)
-    if (!allowGlobal && renderer !== "compact" && typeof slotSessionID(props) !== "string") return ""
+    if (!allowGlobal && renderer !== "compact" && !hasSession) return ""
     if (renderer === "workflow-status") return renderWorkflowStatusText(model, maxChars)
     if (renderer === "running-sessions") return renderRunningSessionsText(model)
     if (renderer === "sidebar") return renderSidebarProgressText(model)
@@ -336,6 +346,10 @@ function liveStatusBySession(api: TuiApi, state: WorkflowState | null): Record<s
     result[node.session_id] = formatSessionStatus(api.state.session.status(node.session_id))
   }
   return result
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null
 }
 
 function formatSessionStatus(status: { type: string; attempt?: number; message?: string } | undefined): string {

@@ -92,6 +92,8 @@ running node 的最新 progress 如果超过显示阈值没有更新，会在 co
 
 slot render 必须返回 OpenTUI/Solid element，而不是裸字符串。TUI 入口会加载 `@opentui/solid/runtime-plugin-support`，再使用 `@opentui/solid` 创建 `text` element，并对 workflow/progress 读取异常做 fail-closed 处理；读取失败时只显示 `SP: progress unavailable`，避免异常进入 host TUI 渲染器。
 
+OpenTUI slot renderer 的类型是 `(ctx, props)`，但 host/runtime 版本可能把 merged props 放在第一个参数。resident slot 读取 session 时必须同时兼容 `props.session_id`、`props.sessionID`、`ctx.session_id`、`ctx.sessionID` 和 `ctx.session.id`。如果只读第二个参数，`sidebar_content` 会在某些 host 路径拿不到当前 session，从而误判为无关 session 或退回全局 workflow。
+
 TUI 读取 workflow/progress 时只在 host 当前目录和明确配置的 workflow project 中查找，不扫描用户磁盘。候选 project 包括：
 
 - `SUPERAGENT_PROJECT_DIR`
@@ -107,7 +109,7 @@ resolver 不再简单返回第一个 `current.json`。选择规则是：
 
 找到 fallback workflow 时，进度 route 会附带一行 `SP: using workflow state from ...` 诊断；没有找到 workflow 时，compact/global 可见 surface 显示 `SP: no workflow state in ...`，避免工作流仍在运行但 UI 静默空白。
 
-常驻 slot 不能依赖父会话消息流触发刷新。child session 写入 `progress.jsonl` 时，parent session 的 `time_updated` 可能不变，因此 resident surface 需要自己定时重读 workflow/progress。`app_bottom` 作为 global slot 显示最近活跃 workflow；`sidebar_content` 和 `sidebar_footer` 作为 session slot 绑定到 host 传入的 `session_id`。无关 session 继续隐藏。
+常驻 slot 不能依赖父会话消息流触发刷新。child session 写入 `progress.jsonl` 时，parent session 的 `time_updated` 可能不变，因此 resident surface 需要自己定时重读 workflow/progress。`app_bottom` 作为 global slot 显示最近活跃 workflow；`sidebar_content` 和 `sidebar_footer` 作为 session slot 绑定到 host 传入的 session id。无关 session 继续隐藏。
 
 当 workflow 进入 `waiting_user` 时，常驻 slot 只显示状态和进展摘要。问题正文和用户回答由 runtime 投递给 parent controller session 后在主会话处理，TUI slot 不承担选择框或自由输入框职责。
 

@@ -232,4 +232,86 @@ describe("progress panel view model", () => {
       "waiting for node dispatch",
     ].join("\n"))
   })
+
+  test("prefers the latest running retry node over an interrupted old node", () => {
+    const state: WorkflowState = {
+      id: "run-1",
+      project: "/repo",
+      session: "session-main",
+      parent_session_id: "session-main",
+      activation: "active",
+      workflow: "feature",
+      entrypoint: "execute",
+      limited_context: true,
+      mode: "execute",
+      phase: "implement",
+      current_phase: "implement",
+      status: "running",
+      goal: "Implement feature",
+      created_at: "2026-06-19T00:00:00.000Z",
+      updated_at: "2026-06-19T00:02:00.000Z",
+      gates: {},
+      artifacts: {},
+      task_graph: {
+        tasks: [{ id: "T3", title: "Retry implementation", summary: "Retry T3", depends_on: [] }],
+      },
+      node_runs: [
+        {
+          id: "011-implement-T3",
+          task_id: "T3",
+          phase: "implement",
+          agent: "sp-implementer",
+          session_id: "session-old",
+          status: "interrupted",
+          attempts: 1,
+          started_at: "2026-06-19T00:00:00.000Z",
+          ended_at: "2026-06-19T00:01:00.000Z",
+          closed_at: "2026-06-19T00:01:00.000Z",
+        },
+        {
+          id: "012-implement-T3-retry-2",
+          task_id: "T3",
+          phase: "implement",
+          agent: "sp-implementer",
+          session_id: "session-new",
+          status: "running",
+          attempts: 2,
+          started_at: "2026-06-19T00:02:00.000Z",
+        },
+      ],
+      history: [{ at: "2026-06-19T00:00:00.000Z", event: "created", to: "feature" }],
+    }
+    const model = buildProgressPanelViewModel(
+      state,
+      {
+        "011-implement-T3": [{
+          at: "2026-06-19T00:01:00.000Z",
+          kind: "session_error",
+          session_id: "session-old",
+          node_id: "011-implement-T3",
+          agent: "sp-implementer",
+          phase: "implement",
+          task_id: "T3",
+          summary: "session error: Aborted",
+        }],
+        "012-implement-T3-retry-2": [{
+          at: "2026-06-19T00:02:05.000Z",
+          kind: "tool_running",
+          session_id: "session-new",
+          node_id: "012-implement-T3-retry-2",
+          agent: "sp-implementer",
+          phase: "implement",
+          task_id: "T3",
+          summary: "bash running",
+        }],
+      },
+      { "session-new": "busy" },
+      new Date("2026-06-19T00:02:10.000Z"),
+    )
+
+    expect(renderCompactProgressText(model)).toBe("SP: sp-implementer T3 running - bash running")
+    expect(renderSidebarProgressText(model)).toContain("sp-implementer T3: running - bash running")
+    expect(renderSidebarProgressText(model)).not.toContain("session error: Aborted")
+    expect(model.tasks[0]?.status).toBe("running")
+  })
 })

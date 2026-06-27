@@ -54,26 +54,56 @@ export type ProjectStore = {
 
 export function createProjectStore(project: string): ProjectStore {
   const root = join(project, ".opencode", "superpowers")
+  let loaded = false
+  let currentRunID: string | undefined
+  const runtimeRuns = new Map<string, WorkflowState>()
+
+  function loadRuntimeMemory(): void {
+    if (loaded) return
+    loaded = true
+    const currentPath = join(root, "current.json")
+    if (existsSync(currentPath)) {
+      const pointer = JSON.parse(readFileSync(currentPath, "utf8")) as { run?: string }
+      currentRunID = pointer.run
+    }
+    const runsRoot = join(root, "runs")
+    if (!existsSync(runsRoot)) return
+    for (const entry of readdirSync(runsRoot, { withFileTypes: true })) {
+      if (!entry.isDirectory()) continue
+      const state = readStateFromDisk(root, entry.name)
+      if (state) runtimeRuns.set(state.id, state)
+    }
+  }
+
+  function persistCurrent(state: WorkflowState): WorkflowState {
+    loaded = true
+    runtimeRuns.set(state.id, state)
+    currentRunID = state.id
+    writeState(root, state)
+    writeCurrent(root, state.id)
+    return state
+  }
+
+  function persistRun(state: WorkflowState): WorkflowState {
+    loaded = true
+    runtimeRuns.set(state.id, state)
+    writeState(root, state)
+    return state
+  }
+
   return {
     root,
     readCurrent() {
-      const currentPath = join(root, "current.json")
-      if (!existsSync(currentPath)) return null
-      const pointer = JSON.parse(readFileSync(currentPath, "utf8")) as { run: string }
-      return this.readRun(pointer.run)
+      loadRuntimeMemory()
+      return currentRunID ? runtimeRuns.get(currentRunID) ?? null : null
     },
     readRun(runID) {
-      const statePath = join(root, "runs", runID, "state.json")
-      if (!existsSync(statePath)) return null
-      return JSON.parse(readFileSync(statePath, "utf8")) as WorkflowState
+      loadRuntimeMemory()
+      return runtimeRuns.get(runID) ?? null
     },
     listRuns() {
-      const runsRoot = join(root, "runs")
-      if (!existsSync(runsRoot)) return []
-      return readdirSync(runsRoot, { withFileTypes: true })
-        .filter((entry) => entry.isDirectory())
-        .map((entry) => this.readRun(entry.name))
-        .filter((state): state is WorkflowState => Boolean(state))
+      loadRuntimeMemory()
+      return [...runtimeRuns.values()]
         .sort((a, b) => b.updated_at.localeCompare(a.updated_at))
     },
     start(args) {
@@ -84,8 +114,7 @@ export function createProjectStore(project: string): ProjectStore {
         mode: args.mode,
         goal: args.goal,
       })
-      writeState(root, state)
-      writeCurrent(root, state.id)
+      persistCurrent(state)
       writeRunMarkdown(root, state.id, "request.md", `# Request\n\n${args.goal.trim()}\n`)
       appendChangelog(root, state.id, `created ${args.mode} workflow`)
       return state
@@ -101,8 +130,7 @@ export function createProjectStore(project: string): ProjectStore {
         activation: "active",
       })
       initializeRunRoot(runRootFor(root, state.id))
-      writeState(root, state)
-      writeCurrent(root, state.id)
+      persistCurrent(state)
       writeRunMarkdown(root, state.id, "request.md", args.request)
       writeRunMarkdown(root, state.id, "task.md", args.request)
       writeRunMarkdown(root, state.id, "proposal.md", args.proposal)
@@ -130,8 +158,7 @@ export function createProjectStore(project: string): ProjectStore {
           artifacts: copySourceArtifacts(root, source.id, state.id, source.artifacts),
         }
       }
-      writeState(root, state)
-      writeCurrent(root, state.id)
+      persistCurrent(state)
       writeRunMarkdown(root, state.id, "request.md", args.request)
       writeRunMarkdown(root, state.id, "task.md", args.request)
       writeRunMarkdown(root, state.id, "proposal.md", args.proposal)
@@ -156,8 +183,7 @@ export function createProjectStore(project: string): ProjectStore {
         pending_question: wasDraft ? undefined : current.pending_question,
         updated_at: new Date().toISOString(),
       }
-      writeState(root, next)
-      writeCurrent(root, next.id)
+      persistCurrent(next)
       appendChangelog(root, next.id, `activated ${next.workflow} workflow from ${next.entrypoint}`)
       return next
     },
@@ -192,8 +218,7 @@ export function createProjectStore(project: string): ProjectStore {
           },
         ],
       }
-      writeState(root, next)
-      writeCurrent(root, next.id)
+      persistCurrent(next)
       appendEvent(root, next.id, {
         type: "startup_recovered_interrupted_nodes",
         node_ids: [...interruptedIDs],
@@ -249,8 +274,7 @@ export function createProjectStore(project: string): ProjectStore {
           },
         ],
       }
-      writeState(root, next)
-      writeCurrent(root, next.id)
+      persistCurrent(next)
       appendEvent(root, next.id, {
         type: "user_input_resumed",
         node_id: sourceNode.id,
@@ -273,8 +297,7 @@ export function createProjectStore(project: string): ProjectStore {
         writeJson(root, current.id, "task_graph.json", normalized)
       }
       const next = applyRecord(current, record)
-      writeState(root, next)
-      writeCurrent(root, next.id)
+      persistCurrent(next)
       appendChangelog(root, next.id, `${record.event}: ${record.status} - ${record.summary}`)
       return next
     },
@@ -305,8 +328,7 @@ export function createProjectStore(project: string): ProjectStore {
         node_runs: nodeRuns,
         pending_question: pendingQuestion,
       }
-      writeState(root, withNodes)
-      writeCurrent(root, withNodes.id)
+      persistCurrent(withNodes)
       appendEvent(root, withNodes.id, {
         type: "report_received",
         node_id: nodeID,
@@ -351,8 +373,7 @@ export function createProjectStore(project: string): ProjectStore {
           },
         ],
       }
-      writeState(root, next)
-      writeCurrent(root, next.id)
+      persistCurrent(next)
       appendEvent(root, next.id, {
         type: args.taskID ? "task_canceled" : args.sessionID ? "session_canceled" : "workflow_canceled",
         task_id: args.taskID,
@@ -392,7 +413,7 @@ export function createProjectStore(project: string): ProjectStore {
       }
       writeNodeTask(root, current.id, node.id, args.task_markdown)
       writeReportTask(root, current.id, node.task_id ?? node.id, args.task_markdown)
-      writeState(root, next)
+      persistRun(next)
       appendEvent(root, current.id, {
         type: "session_started",
         node_id: node.id,
@@ -406,8 +427,16 @@ export function createProjectStore(project: string): ProjectStore {
     reset() {
       const currentPath = join(root, "current.json")
       if (existsSync(currentPath)) rmSync(currentPath)
+      loaded = true
+      currentRunID = undefined
     },
   }
+}
+
+function readStateFromDisk(root: string, runID: string): WorkflowState | null {
+  const statePath = join(root, "runs", runID, "state.json")
+  if (!existsSync(statePath)) return null
+  return JSON.parse(readFileSync(statePath, "utf8")) as WorkflowState
 }
 
 function resumableStatus(status: WorkflowState["status"]): WorkflowState["status"] {

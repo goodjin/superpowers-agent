@@ -1,4 +1,5 @@
 import { tool, type ToolDefinition } from "@opencode-ai/plugin/tool"
+import { buildWorkflowStatusSnapshot } from "../status/workflow-status"
 import type { ProjectStore } from "../state/store"
 import type { WorkflowState } from "../state/types"
 
@@ -10,18 +11,36 @@ export function createStatusTool(store: ProjectStore): ToolDefinition {
     args: {
       workflow_id: tool.schema.string().optional().describe("Optional workflow/run id to inspect"),
       task_id: tool.schema.string().optional().describe("Optional task id to focus on"),
+      session_id: tool.schema.string().optional().describe("Optional child or parent session id to focus on"),
       include_history: tool.schema.boolean().optional().describe("Include incomplete historical workflows"),
+      detail: tool.schema.enum(["summary", "task", "sessions", "full"]).optional().describe("Detail level for the status response"),
+      include_progress: tool.schema.boolean().optional().describe("Include recent node progress events from progress.jsonl"),
+      progress_tail: tool.schema.number().optional().describe("Number of recent progress events per node when include_progress is true"),
     },
     async execute(args) {
       const current = args.workflow_id ? store.readRun(args.workflow_id) : store.readCurrent()
       const history = args.include_history || !current ? incompleteRuns(store.listRuns()) : undefined
-      const focused = current && args.task_id ? focusTask(current, args.task_id) : undefined
+      const snapshot = current
+        ? buildWorkflowStatusSnapshot({
+            state: current,
+            detail: args.detail,
+            taskID: args.task_id,
+            sessionID: args.session_id,
+            includeProgress: args.include_progress,
+            progressTail: args.progress_tail,
+          })
+        : undefined
       return JSON.stringify(
         {
-          current,
-          task: focused,
+          source: snapshot?.source ?? "history_scan",
+          current: snapshot?.current,
+          summary: snapshot?.summary,
+          task: snapshot?.task,
+          sessions: snapshot?.sessions,
+          runtime: snapshot?.runtime,
+          durable: snapshot?.durable,
+          recommended_next: snapshot?.recommended_next,
           incomplete_workflows: history,
-          source: current ? "runtime_current" : "history_scan",
         },
         null,
         2,
@@ -32,14 +51,4 @@ export function createStatusTool(store: ProjectStore): ToolDefinition {
 
 function incompleteRuns(runs: WorkflowState[]): WorkflowState[] {
   return runs.filter((run) => INCOMPLETE_STATUSES.has(run.status))
-}
-
-function focusTask(state: WorkflowState, taskID: string) {
-  const task = state.task_graph?.tasks.find((candidate) => candidate.id === taskID)
-  const node_runs = state.node_runs.filter((run) => run.task_id === taskID)
-  return {
-    task,
-    node_runs,
-    latest_report: [...node_runs].reverse().find((run) => run.record_path),
-  }
 }
