@@ -1,3 +1,5 @@
+import { existsSync, readFileSync } from "node:fs"
+import { isAbsolute, join, normalize } from "node:path"
 import type { DispatchDecision } from "../router/transition"
 import type { SessionAdapter } from "./adapter"
 import { buildNodeTaskPrompt } from "./templates"
@@ -26,7 +28,12 @@ export function createSessionOrchestrator(adapter: SessionAdapter) {
       packet: NodeTaskPacket
       onSessionCreated?: (args: { sessionID: string; taskMarkdown: string }) => Promise<void>
     }): Promise<SessionDispatchResult> {
-      const taskMarkdown = buildNodeTaskPrompt(args.packet)
+      const packet = inlineRequiredArtifacts({
+        project: args.project,
+        runID: args.runID,
+        packet: args.packet,
+      })
+      const taskMarkdown = buildNodeTaskPrompt(packet)
       await adapter.showProgress({
         stage: "dispatch_started",
         title: "Superpowers dispatch",
@@ -153,6 +160,44 @@ export function createSessionOrchestrator(adapter: SessionAdapter) {
       })
     },
   }
+}
+
+function inlineRequiredArtifacts(args: {
+  project: string
+  runID: string
+  packet: NodeTaskPacket
+}): NodeTaskPacket {
+  if (args.packet.required_artifacts.length === 0) return args.packet
+  const runRoot = join(args.project, ".opencode", "superpowers", "runs", args.runID)
+  return {
+    ...args.packet,
+    source_artifacts: args.packet.required_artifacts.map((artifact) => {
+      const path = resolveArtifactPath(runRoot, artifact.path)
+      if (!path) {
+        return {
+          ...artifact,
+          missing: "artifact path escapes the workflow run directory.",
+        }
+      }
+      if (!existsSync(path)) {
+        return {
+          ...artifact,
+          missing: `not found under ${runRoot}`,
+        }
+      }
+      return {
+        ...artifact,
+        body: readFileSync(path, "utf8"),
+      }
+    }),
+  }
+}
+
+function resolveArtifactPath(runRoot: string, artifactPath: string): string | null {
+  const path = isAbsolute(artifactPath) ? normalize(artifactPath) : normalize(join(runRoot, artifactPath))
+  const normalizedRunRoot = normalize(runRoot)
+  if (path !== normalizedRunRoot && !path.startsWith(`${normalizedRunRoot}/`)) return null
+  return path
 }
 
 function scheduleNodePrompt(

@@ -4,6 +4,7 @@ import type { NodeTaskPacket } from "./task-packet"
 
 export function buildNodeTaskPrompt(packet: NodeTaskPacket): string {
   const artifacts = packet.required_artifacts.map((artifact) => `- ${artifact.name}: ${artifact.path}`).join("\n")
+  const sourceArtifacts = formatSourceArtifacts(packet.source_artifacts)
   const contextSections = (packet.context_sections ?? [])
     .map((section) => `## ${section.title}\n${section.body.trim()}`)
     .join("\n\n")
@@ -26,6 +27,8 @@ export function buildNodeTaskPrompt(packet: NodeTaskPacket): string {
     "## Required Artifacts",
     artifacts || "- none",
     "",
+    sourceArtifacts,
+    sourceArtifacts ? "" : "",
     packet.retry_context ? `## Retry Context\n${packet.retry_context}\n` : "",
     "## sp_report Contract",
     `- event: ${packet.record_contract.event}`,
@@ -38,6 +41,27 @@ export function buildNodeTaskPrompt(packet: NodeTaskPacket): string {
   ]
     .filter(Boolean)
     .join("\n")
+}
+
+function formatSourceArtifacts(sourceArtifacts: NodeTaskPacket["source_artifacts"]): string {
+  if (!sourceArtifacts?.length) return ""
+  const sections = sourceArtifacts.map((artifact) => {
+    if (artifact.body !== undefined) {
+      return [
+        `### ${artifact.name}: ${artifact.path}`,
+        "",
+        "```markdown",
+        artifact.body.trimEnd(),
+        "```",
+      ].join("\n")
+    }
+    return [
+      `### ${artifact.name}: ${artifact.path}`,
+      "",
+      `Missing: ${artifact.missing ?? "artifact was not found in the workflow run directory."}`,
+    ].join("\n")
+  })
+  return ["## Source Artifacts", ...sections].join("\n\n")
 }
 
 export function buildControllerUserInputPrompt(state: WorkflowState): string {

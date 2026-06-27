@@ -1,3 +1,6 @@
+import { mkdirSync, rmSync, writeFileSync } from "node:fs"
+import { tmpdir } from "node:os"
+import { join } from "node:path"
 import { describe, expect, test } from "bun:test"
 import { createSessionOrchestrator } from "../src/session/orchestrator"
 import { buildChildRequestId, buildNodeTaskPrompt } from "../src/session/templates"
@@ -69,6 +72,63 @@ describe("buildNodeTaskPrompt", () => {
 })
 
 describe("createSessionOrchestrator", () => {
+  test("inlines required artifact bodies into dispatched node prompts", async () => {
+    const project = join(tmpdir(), `sp-inline-artifacts-${Date.now()}-${Math.random().toString(36).slice(2)}`)
+    const runID = "run-inline"
+    const runRoot = join(project, ".opencode", "superpowers", "runs", runID)
+    mkdirSync(join(runRoot, "artifacts"), { recursive: true })
+    writeFileSync(join(runRoot, "request.md"), "# Request\n\nBuild a computer-use agent.\n")
+    writeFileSync(join(runRoot, "artifacts", "plan.md"), "# Plan\n\nImplement T01 first.\n")
+
+    try {
+      const prompts: string[] = []
+      const orchestrator = createSessionOrchestrator({
+        async createNodeSession() {
+          return "session-node"
+        },
+        async continueNodeSession(input) {
+          prompts.push(input.prompt)
+        },
+        async showProgress() {},
+      })
+
+      await orchestrator.dispatch({
+        project,
+        runID,
+        parentSessionID: "session-main",
+        decision: {
+          action: "create_session",
+          phase: "plan",
+          agent: "sp-planner",
+          primary_skill: "superpowers-writing-plans",
+          reason: "plan next",
+        },
+        packet: {
+          run_id: runID,
+          node_id: "001-plan",
+          workflow: "feature",
+          phase: "plan",
+          agent: "sp-planner",
+          primary_skill: "superpowers-writing-plans",
+          objective: "Write plan.",
+          required_artifacts: [
+            { name: "request", path: "request.md" },
+            { name: "plan", path: "artifacts/plan.md" },
+          ],
+          record_contract: { event: "plan", expected_artifacts: ["plan"], allowed_gates: ["plan_written"] },
+        },
+      })
+
+      expect(prompts[0]).toContain("## Source Artifacts")
+      expect(prompts[0]).toContain("### request: request.md")
+      expect(prompts[0]).toContain("Build a computer-use agent.")
+      expect(prompts[0]).toContain("### plan: artifacts/plan.md")
+      expect(prompts[0]).toContain("Implement T01 first.")
+    } finally {
+      rmSync(project, { recursive: true, force: true })
+    }
+  })
+
   test("creates a node session and returns the rendered task packet", async () => {
     const calls: Array<{ stage: "create" | "prompt"; agent: string; prompt?: string }> = []
     const progress: Array<{ stage: string; message: string }> = []
