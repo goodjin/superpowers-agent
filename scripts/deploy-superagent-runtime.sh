@@ -98,6 +98,12 @@ ROOT="\${SUPERAGENT_ROOT:-$RUNTIME_ROOT}"
 PORT="\${SUPERAGENT_PORT:-$PORT}"
 HOSTNAME="\${SUPERAGENT_HOSTNAME:-$HOSTNAME}"
 PROJECT_DIR="\${SUPERAGENT_PROJECT_DIR:-\$PWD}"
+DEPLOY_SCRIPT="$REPO_ROOT/scripts/deploy-superagent-runtime.sh"
+case "\${1:-}" in
+  start|stop|restart|status)
+    exec "\$DEPLOY_SCRIPT" "\$1"
+    ;;
+esac
 export HOME="\$ROOT/home"
 export XDG_CONFIG_HOME="\$ROOT/home/.config"
 if [[ \$# -eq 0 ]]; then
@@ -116,10 +122,27 @@ stop_server() {
     pid="$(cat "$PID_FILE")"
   fi
 
+  if [[ -n "$pid" ]] && ! kill -0 "$pid" 2>/dev/null; then
+    pid=""
+  fi
+
   if [[ -z "$pid" ]]; then
     pid="$(listener_pid || true)"
   fi
 
+  terminate_pid "$pid"
+
+  local listener
+  listener="$(listener_pid || true)"
+  if [[ -n "$listener" ]] && [[ "$listener" != "$pid" ]]; then
+    terminate_pid "$listener"
+  fi
+
+  rm -f "$PID_FILE"
+}
+
+terminate_pid() {
+  local pid="$1"
   if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then
     kill "$pid"
     for _ in {1..30}; do
@@ -132,7 +155,6 @@ stop_server() {
       kill -9 "$pid" 2>/dev/null || true
     fi
   fi
-  rm -f "$PID_FILE"
 }
 
 start_server() {
@@ -150,23 +172,35 @@ start_server() {
     echo $! > "$PID_FILE"
   )
 
+  local listener
   for _ in {1..50}; do
-    local listener
     listener="$(listener_pid || true)"
     if [[ -n "$listener" ]]; then
       echo "$listener" > "$PID_FILE"
-      return 0
+      break
     fi
     sleep 0.2
   done
 
-  if [[ ! -f "$PID_FILE" ]] || ! kill -0 "$(cat "$PID_FILE")" 2>/dev/null; then
+  if [[ -z "${listener:-}" ]] || [[ ! -f "$PID_FILE" ]] || ! kill -0 "$(cat "$PID_FILE")" 2>/dev/null; then
     echo "Superagent failed to start. Log: $LOG_FILE" >&2
     tail -n 80 "$LOG_FILE" >&2 || true
     return 1
   fi
 
-  wait_for_assets
+  if ! wait_for_assets; then
+    stop_server
+    return 1
+  fi
+
+  listener="$(listener_pid || true)"
+  if [[ -z "$listener" ]] || ! kill -0 "$listener" 2>/dev/null; then
+    echo "Superagent assets became ready, but the server is no longer listening. Log: $LOG_FILE" >&2
+    tail -n 80 "$LOG_FILE" >&2 || true
+    stop_server
+    return 1
+  fi
+  echo "$listener" > "$PID_FILE"
 }
 
 listener_pid() {
@@ -179,7 +213,7 @@ wait_for_assets() {
     html="$(curl -fsS --max-time 2 "http://$HOSTNAME:$PORT/" 2>/dev/null || true)"
     if [[ "$html" == *"/assets/index-"* ]]; then
       local entry
-      entry="$(printf '%s' "$html" | sed -n 's/.*src=\"\\(\\/assets\\/index-[^\"]*\\.js\\)\".*/\\1/p' | head -n 1)"
+      entry="$(printf '%s' "$html" | grep -oE 'src="/assets/index-[^"]+\.js"' | head -n 1 | sed 's/^src="//; s/"$//')"
       if [[ -n "$entry" ]]; then
         local bytes
         bytes="$(curl -fsS --max-time 3 "http://$HOSTNAME:$PORT$entry" 2>/dev/null | wc -c | tr -d ' ')"
