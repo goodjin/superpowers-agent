@@ -37,7 +37,17 @@ export type ProgressPanelTaskRow = {
   task_id: string
   title: string
   summary: string
-  status: "pending" | "running" | "passed" | "failed" | "blocked" | "needs_user" | "interrupted"
+  status:
+    | "pending"
+    | "running"
+    | "passed"
+    | "failed"
+    | "blocked"
+    | "needs_user"
+    | "interrupted"
+    | "dispatch_failed"
+    | "notification_failed"
+    | "canceled"
   node_id?: string
 }
 

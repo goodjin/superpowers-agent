@@ -48,8 +48,14 @@ export function decideNextDispatches(state: WorkflowState, record?: SpRecordInpu
   if (record.status === "needs_user") return [{ action: "wait_user", reason: "node requested user input" }]
   if (record.status === "blocked") return [{ action: "blocked", reason: record.summary }]
   if (record.status === "failed") return failedRecordDispatches(state, record)
+  if (state.activation === "draft" && record.event === "design") {
+    return [{ action: "wait_user", reason: "candidate design is ready for approval or revision" }]
+  }
   if (state.activation === "draft" && record.event === "plan") {
-    return [{ action: "wait_user", reason: "plan is ready for controller review and user confirmation" }]
+    if (!record.task_graph?.tasks.length && state.workflow !== "plan-only") {
+      return [{ action: "blocked", reason: "candidate plan passed without a task graph" }]
+    }
+    return [{ action: "wait_user", reason: "candidate plan is ready for approval or revision" }]
   }
 
   switch (record.event) {
@@ -95,6 +101,8 @@ export function decideNextDispatches(state: WorkflowState, record?: SpRecordInpu
 
 function decideFromState(state: WorkflowState): DispatchDecision[] {
   if (state.status === "waiting_user") return [{ action: "wait_user", reason: "workflow is waiting for user input" }]
+  if (state.status === "awaiting_design_approval") return [{ action: "wait_user", reason: "candidate design is waiting for approval or revision" }]
+  if (state.status === "awaiting_plan_approval") return [{ action: "wait_user", reason: "candidate plan is waiting for approval or revision" }]
   if (state.status === "canceled") return [{ action: "blocked", reason: "workflow is canceled" }]
   if (state.status === "recovered_unknown") {
     const interrupted = state.node_runs.filter((run) => run.status === "interrupted").map((run) => run.id)
@@ -109,7 +117,7 @@ function decideFromState(state: WorkflowState): DispatchDecision[] {
   if (finish?.status === "running") return []
   if (finish?.status === "passed") return [{ action: "finish", reason: "finish record passed" }]
   if (finish?.status === "needs_user") return [{ action: "wait_user", reason: "finish node requested user input" }]
-  if (finish && ["failed", "blocked"].includes(finish.status)) return [create("finish", "sp-finisher", `finish is ${finish.status}; retry finish`)]
+  if (finish && ["failed", "blocked", "canceled"].includes(finish.status)) return [create("finish", "sp-finisher", `finish is ${finish.status}; retry finish`)]
 
   const blockedCheck = latestRecoverableCheck(state)
   if (blockedCheck) return failedRecordDispatches(state, {
@@ -118,6 +126,7 @@ function decideFromState(state: WorkflowState): DispatchDecision[] {
     summary: `${blockedCheck.phase} is ${blockedCheck.status}; retry implementation`,
   })
 
+  if (state.status === "waiting_user_decision") return [{ action: "blocked", reason: "workflow is waiting for a controller/user decision" }]
   if (state.status === "blocked" || state.status === "failed") return [{ action: "blocked", reason: `workflow is ${state.status}` }]
   if (hasRunningNodeRuns(state)) return []
 
@@ -173,7 +182,7 @@ function dispatchEntrypoint(state: WorkflowState): DispatchDecision[] {
 
 function planDispatches(state: WorkflowState, record: SpRecordInput): DispatchDecision[] {
   const graph = record.task_graph ?? state.task_graph
-  if (!graph) return [create("implement", "sp-implementer", "plan passed without task graph")]
+  if (!graph) return [{ action: "blocked", reason: "plan passed without task graph" }]
   const normalized = normalizeTaskGraph(graph)
   const { passed, running, failed } = taskRunSetsForWorkflow({ ...state, task_graph: normalized })
   return getRunnableTasks(normalized, { passed, running, failed }).map((task) =>

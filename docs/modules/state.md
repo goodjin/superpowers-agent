@@ -47,6 +47,7 @@ state 模块负责 workflow run 的本地持久化、artifact/report 写入、ta
 `WorkflowState` 保留旧 e2e 读取的 `mode`、`phase`、`session` 字段，同时新增 control-plane 字段：
 
 - `activation`
+- `prepare_mode`
 - `workflow`
 - `entrypoint`
 - `limited_context`
@@ -55,6 +56,7 @@ state 模块负责 workflow run 的本地持久化、artifact/report 写入、ta
 - `status`
 - `node_runs`
 - `pending_question`
+- `state_version`
 
 其中 `activation` 用来区分：
 
@@ -67,9 +69,24 @@ state 模块负责 workflow run 的本地持久化、artifact/report 写入、ta
 - `entrypoint` 是启动入口，描述用户确认从哪里进入流程；它不应覆盖 `phase/current_phase` 的恢复判断。
 - `mode` 是兼容旧测试和 OpenCode mode 的粗粒度入口；新的 runtime 判断优先看 `workflow`、`entrypoint`、`current_phase`、`status` 和 `node_runs`。
 - `phase` 与 `current_phase` 当前保持同义，用于 durable state、UI 和测试读取。未来如果需要保留历史兼容字段，新的判断应优先读 `current_phase`。
-- `status` 是 workflow 级状态，例如 `running`、`waiting_user`、`blocked`、`failed`、`passed`、`canceled`。
+- `status` 是 workflow 级状态，例如 `running`、`awaiting_design_approval`、`awaiting_plan_approval`、`waiting_user`、`waiting_user_decision`、`blocked`、`failed`、`passed`、`canceled`、`recovered_unknown`。
 - `pending_question` 只保存等待用户回答的问题；问题回答后必须通过 `sp_start(run_id, resume_input)` 清空并恢复原 child session。
 - `task_graph` 是结构化任务图。runtime 不从 `plan.md` 反推任务图。
+- `state_version` 是状态版本。批准 design/plan、resume 用户输入、dispatch node、cancel 和 startup reconciliation 都会推进版本；`sp_start(expected_state_version=...)` 用它避免 stale approval。
+
+## Candidate And Canonical Artifacts
+
+draft 状态下的 design/plan 输出先作为 candidate 保存：
+
+- candidate design: `nodes/<designer-node>/record.json` 和 `output.md`
+- candidate plan: `nodes/<planner-node>/record.json` 和 `output.md`
+
+candidate 不会直接写入 `artifacts/spec.md`、`artifacts/plan.md`、`task_graph.json` 或 `tasks.json`。promotion 只发生在：
+
+- `sp_start(start_action="approve_design")`：读取 latest passed design candidate，写入 `artifacts/spec.md` 和 flat `spec.md`，设置 `design_approved/spec_written` gate，并记录 `design_approved` event。
+- `sp_start(start_action="approve_plan")`：读取 latest passed plan candidate，校验 task graph，写入 `artifacts/plan.md`、flat `plan.md`、`task_graph.json` 和 `tasks.json`，设置 `plan_written` gate，并记录 `plan_approved` event。
+
+下游 planner/implementer/checker 只消费 canonical artifacts。candidate output 只用于用户 review、controller feedback、恢复和审计。
 
 ## Record Status Semantics
 
@@ -83,7 +100,7 @@ state 模块负责 workflow run 的本地持久化、artifact/report 写入、ta
 | `blocked` | 当前 node 或 workflow 进入 blocked。 | 不派发后续节点，等待用户或 controller recovery。 |
 | `needs_user` | workflow 进入 `waiting_user`，写入 `pending_question`。 | 不派发后续节点；report handler 通知 parent controller session。 |
 
-`progress` 和 `passed` 的边界很重要。planner 可以多次用 `progress` 追加 plan/task graph 草稿；只有 `passed` 才表示当前 planner 输出可用于 runtime transition。implementation、acceptance、verification、code-review 也遵守同样规则：中间进度不应改变派发链。
+`progress` 和 `passed` 的边界很重要。planner 可以多次用 `progress` 追加 candidate plan/task graph 草稿；只有 `passed` 才表示当前 planner 输出可进入 approval decision。implementation、acceptance、verification、code-review 也遵守同样规则：中间进度不应改变派发链。
 
 ## Node Runs
 
@@ -104,6 +121,12 @@ state 模块负责 workflow run 的本地持久化、artifact/report 写入、ta
 
 `recordNodeResult()` 会把 matching node 从 `running` 更新成 `passed`、`failed`、`blocked` 或 `needs_user`；`progress` 只更新 `reported_at`，不会关闭 session run。记录会写入 `nodes/<node-id>/record.json`、`output.md` 和 `reports/<task-id>/...`。
 
+v4 新增 node 状态：
+
+- `dispatch_failed`：child session 创建或调度失败，workflow 进入 `waiting_user_decision`，等待 retry/cancel。
+- `notification_failed`：node 已请求用户输入，但 parent notification 失败；`pending_question` 仍是事实来源。
+- `canceled`：用户取消了 node/session；workflow 不能保持无 live node 的 `running`。
+
 matching node 的归属顺序是：显式 `nodeID`、child `sessionID`、event phase/agent 的唯一 running match、单一 running node fallback。如果仍有多个 running node，runtime 应拒绝猜测，避免并行任务的 report 写到错误 node。
 
 `addNodeRun()` 是 runtime 确认派发新节点后的恢复点。只要 workflow 还没有 `passed` 或 `canceled`，新增 node run 会把 workflow `status` 设回 `running`，并把 `phase/current_phase` 更新为新节点 phase。这样 acceptance、verification 或 code review 失败后触发 retry implementer 时，UI 不会继续停留在 failed 状态。
@@ -114,6 +137,7 @@ matching node 的归属顺序是：显式 `nodeID`、child `sessionID`、event p
 
 - 是否有 active child session，看 `node_runs[].status === "running"`。
 - `interrupted` 表示插件启动恢复时发现旧 running node 已不能视为 live session；它和 failed/blocked/needs_user 一样会阻塞 task graph 自动推进。
+- interrupted/canceled/dispatch_failed session 的 late report 不会覆盖 current state。store 会把迟到报告写成 `late_report_ignored` 审计事件，保留旧 node 和 newer attempt 的状态。
 - 一个 implementation task 是否完成，不能只看 `sp-implementer` passed；还要看同一 `task_id` 的 acceptance、verification 和 code-review 是否按 workflow policy 通过。
 - finish 是否需要重派，看 finish node 是否缺少 record、是否 blocked/canceled、以及 workflow 是否已经 `passed`。
 - 重试不能覆盖旧 node run，应追加 attempt 或新 node id，保留审计链。

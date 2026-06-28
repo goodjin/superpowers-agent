@@ -2,7 +2,7 @@
 
 ## Goal
 
-在 v3 PRD 的基础上，把异常路径、恢复路径和用户等待路径补成闭合设计，形成 v4 PRD，作为后续实现和测试的产品依据。
+在 v3 PRD 的基础上，把异常路径、恢复路径和用户等待路径补成闭合设计，并按 v4 PRD 落地核心 runtime 闭环。
 
 ## Background
 
@@ -29,7 +29,8 @@ v3 已经统一了 public tool loop、task-scoped 检查链、runtime memory 优
 
 ## Scope
 
-- 新增 `docs/superpowers/specs/2026-06-27-controller-prd-v4.md`。
+- 新增并维护 `docs/superpowers/specs/2026-06-27-controller-prd-v4.md`。
+- 实现 v4 核心 runtime 行为：prepare mode、approval promotion、controller feedback、state version、dispatch failure visibility、late report isolation。
 - 将 v4 定位为 v3 之后的实现前设计稿。
 - 明确所有非终态 workflow 都要有可解释的下一步决策。
 - 将 feature 准备阶段调整为 `sp_prepare(managed_design) -> designer draft -> awaiting_design_approval -> sp_start -> planner draft -> awaiting_plan_approval`。
@@ -41,7 +42,7 @@ v3 已经统一了 public tool loop、task-scoped 检查链、runtime memory 优
 - 明确 draft workflow 的 startup recovery：activation 可以保持 draft，但 stale running draft node 必须标记 interrupted 并给出 retry/revise/cancel。
 - 明确 late report 只作为审计或由 controller 决策接受，不直接覆盖 canonical state。
 - 明确 approved design/plan revision 后的 stale artifact 和 downstream dispatch 处理。
-- 明确异常场景下的状态落盘、用户可见性、恢复动作和验收用例。
+- 明确异常场景下的状态落盘、用户可见性、恢复动作和验收用例，并补充对应单元测试。
 - 更新 `docs/modules/product-docs.md`，把当前 PRD 源指向 v4。
 
 ## Design Decisions
@@ -62,10 +63,12 @@ v3 已经统一了 public tool loop、task-scoped 检查链、runtime memory 优
 ## Acceptance
 
 - v4 PRD 覆盖 draft preparation、cancel、waiting user、dispatch failure、parent notification failure、stale return state、missing task graph 和 stalled running 等场景。
-- v4 PRD 覆盖 controller intake、designer question boundary、controller autonomy 和 plugin feedback contract。
-- v4 PRD 覆盖 candidate/canonical artifact、approval promotion、state version 防 stale approval、draft node startup recovery。
-- v4 PRD 覆盖 late report、approved artifact revision 和 downstream stale handling。
-- v4 PRD 提供状态决策表，能判断每类非终态 workflow 的下一步。
-- v4 PRD 提供场景覆盖矩阵，用于后续实现前检查遗漏场景。
-- v4 PRD 提供可测试的验收场景，后续实现可以直接转成测试用例。
-- 文档保持产品设计口径，不在本次改动中修改 runtime 代码。
+- runtime 支持 `prepare_mode=proposal_only|managed_design|managed_planning`，feature 默认在 `sp_prepare` 派发 designer draft。
+- runtime 支持 `sp_start(start_action=approve_design|approve_plan|resume_user_input|retry_node|start_entrypoint)`，并用 `expected_state_version` 拒绝 stale approval。
+- candidate design/plan 在批准前只保存在 `nodes/<node-id>/record.json` 和 `output.md`；批准后才写入 `artifacts/spec.md`、`artifacts/plan.md`、`task_graph.json` 和 `tasks.json`。
+- 所有 public tools 返回 `controller_feedback` 或同等结构，让 controller 能看到 recommended next、approval target、blocking reason 和 artifact mode。
+- late report from interrupted session 只写审计事件，不覆盖 current state、canonical artifact 或 newer attempt。
+- `plan passed` 但缺少 task graph 时不再默认派发 generic implementer。
+- `sp_report(status=progress)` 不清空 `pending_question`，不触发 dispatch。
+- 测试覆盖 v4 approval promotion、stale state version、late report isolation、managed design prepare、恢复和非阻塞派发。
+- 验证命令：`bun run test`、`bun run build`。

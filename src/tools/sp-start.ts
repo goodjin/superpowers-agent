@@ -6,7 +6,8 @@ import { decideNextDispatches } from "../router/transition"
 import { buildChildResumePrompt, buildNodeTaskPacket } from "../session/templates"
 import type { SessionOrchestrator } from "../session/orchestrator"
 import type { ProjectStore } from "../state/store"
-import type { ResumeInput, WorkflowEntrypoint, WorkflowKind } from "../state/types"
+import type { ResumeInput, StartAction, WorkflowEntrypoint, WorkflowKind, WorkflowState } from "../state/types"
+import { buildControllerFeedback, inferStartAction, staleStateFeedback } from "../controller/feedback"
 
 type StartOrchestrator = Pick<SessionOrchestrator, "dispatch"> & Partial<Pick<SessionOrchestrator, "resumeNode">>
 
@@ -23,6 +24,8 @@ export function createStartTool(
       entrypoint: tool.schema.string().optional().describe("Confirmed entrypoint"),
       proposal: tool.schema.string().optional().describe("Proposal markdown that was confirmed by the user"),
       run_id: tool.schema.string().optional().describe("Prepared run id to activate after plan review"),
+      start_action: tool.schema.enum(["start_entrypoint", "approve_design", "approve_plan", "resume_user_input", "retry_node"]).optional().describe("Explicit v4 start action."),
+      expected_state_version: tool.schema.string().optional().describe("Optional optimistic concurrency guard for approval or retry actions."),
       task_id: tool.schema.string().optional().describe("Optional task id to resume when activating a prepared plan"),
       session: tool.schema.string().optional().describe("Controller session id"),
       resume_input: tool.schema
@@ -37,9 +40,29 @@ export function createStartTool(
     },
     async execute(args, context) {
       const sessionID = args.session ?? context.sessionID
-      if (args.resume_input) {
+      const currentForVersion = args.run_id ? store.readRun(args.run_id) : store.readCurrent()
+      const currentStateVersion = currentForVersion?.state_version ?? (currentForVersion ? `${currentForVersion.updated_at}:legacy` : undefined)
+      if (args.expected_state_version && currentForVersion && args.expected_state_version !== currentStateVersion) {
+        return JSON.stringify(
+          {
+            state: currentForVersion,
+            dispatches: [],
+            controller_feedback: staleStateFeedback(currentForVersion, args.expected_state_version),
+          },
+          null,
+          2,
+        )
+      }
+      const startAction = currentForVersion ? inferStartAction(currentForVersion, {
+        start_action: args.start_action as StartAction | undefined,
+        resume_input: args.resume_input,
+        task_id: args.task_id,
+      }) : (args.start_action as StartAction | undefined) ?? "start_entrypoint"
+
+      if (startAction === "resume_user_input" || args.resume_input) {
         if (!args.run_id) throw new Error("sp_start resume_input requires run_id.")
         if (!orchestrator?.resumeNode) throw new Error("sp_start resume_input requires a session orchestrator with resumeNode.")
+        if (!args.resume_input) throw new Error("sp_start resume_user_input requires resume_input.")
         const before = store.readRun(args.run_id)
         const pendingQuestion = before?.pending_question
         const resumed = store.consumePendingQuestion({
@@ -76,6 +99,8 @@ export function createStartTool(
                 session_id: result.session_id,
               },
             ],
+            start_action: startAction,
+            controller_feedback: buildControllerFeedback(store.readCurrent() ?? resumed.state),
           },
           null,
           2,
@@ -85,11 +110,39 @@ export function createStartTool(
       let dispatches: Array<Record<string, string | undefined>> = []
       let startMode: "new" | "resume" = "new"
       if (args.run_id) {
-        state = store.activateRun({
-          runID: args.run_id,
-          parentSessionID: sessionID,
-        })
         startMode = "resume"
+        if (startAction === "approve_design") {
+          state = store.approveDesign({
+            runID: args.run_id,
+            parentSessionID: sessionID,
+            approvedBySessionID: sessionID,
+          })
+          dispatches = await dispatchStart({
+            store,
+            orchestrator,
+            state,
+            startMode,
+            decisions: [createPlanDecision()],
+          })
+        } else if (startAction === "approve_plan") {
+          state = store.approvePlan({
+            runID: args.run_id,
+            parentSessionID: sessionID,
+            approvedBySessionID: sessionID,
+          })
+          dispatches = await dispatchStart({
+            store,
+            orchestrator,
+            state,
+            taskID: args.task_id,
+            startMode,
+          })
+        } else {
+          state = store.activateRun({
+            runID: args.run_id,
+            parentSessionID: sessionID,
+          })
+        }
       } else {
         if (!args.request || !args.workflow || !args.entrypoint || !args.proposal) {
           throw new Error("sp_start requires request, workflow, entrypoint, and proposal when run_id is not provided.")
@@ -103,13 +156,15 @@ export function createStartTool(
         })
         state = store.startRun(start)
       }
-      dispatches = await dispatchStart({
-        store,
-        orchestrator,
-        state,
-        taskID: args.task_id,
-        startMode,
-      })
+      if (dispatches.length === 0 && startAction !== "approve_design" && startAction !== "approve_plan") {
+        dispatches = await dispatchStart({
+          store,
+          orchestrator,
+          state,
+          taskID: args.task_id,
+          startMode,
+        })
+      }
       await progress.report({
         stage: "run_started",
         title: "Superpowers workflow",
@@ -118,8 +173,10 @@ export function createStartTool(
       })
       return JSON.stringify(
         {
-          state,
+          state: store.readCurrent() ?? state,
           dispatches: dispatches.length > 0 ? dispatches : startDecisions(state, startMode, args.task_id),
+          start_action: startAction,
+          controller_feedback: buildControllerFeedback(store.readCurrent() ?? state),
         },
         null,
         2,
@@ -128,15 +185,16 @@ export function createStartTool(
   })
 }
 
-async function dispatchStart(args: {
+export async function dispatchWorkflowDecisions(args: {
   store: ProjectStore
   orchestrator?: Pick<SessionOrchestrator, "dispatch">
-  state: ReturnType<ProjectStore["activateRun"]>
+  state: WorkflowState
   taskID?: string
   startMode: "new" | "resume"
+  decisions?: ReturnType<typeof startDecisions>
 }): Promise<Array<Record<string, string | undefined>>> {
   if (!args.orchestrator) return []
-  const decisions = startDecisions(args.state, args.startMode, args.taskID)
+  const decisions = args.decisions ?? startDecisions(args.state, args.startMode, args.taskID)
   const filtered = args.taskID && args.state.status !== "recovered_unknown"
     ? decisions.filter((decision) => "task_id" in decision && decision.task_id === args.taskID)
     : decisions
@@ -150,24 +208,42 @@ async function dispatchStart(args: {
       nodeID: nextDispatchNodeID(current.node_runs.length + dispatches.length + 1, decision.phase, decision.task_id),
     })
     let nodeRegistered = false
-    const result = await args.orchestrator.dispatch({
-      project: current.project,
-      runID: current.id,
-      parentSessionID: current.parent_session_id,
-      decision,
-      packet,
-      async onSessionCreated(input) {
-        args.store.addNodeRun({
-          phase: decision.phase,
-          agent: decision.agent,
-          primary_skill: decision.primary_skill,
-          session_id: input.sessionID,
-          task_id: decision.task_id,
-          task_markdown: input.taskMarkdown,
-        })
-        nodeRegistered = true
-      },
-    })
+    let result
+    try {
+      result = await args.orchestrator.dispatch({
+        project: current.project,
+        runID: current.id,
+        parentSessionID: current.parent_session_id,
+        decision,
+        packet,
+        async onSessionCreated(input) {
+          args.store.addNodeRun({
+            phase: decision.phase,
+            agent: decision.agent,
+            primary_skill: decision.primary_skill,
+            session_id: input.sessionID,
+            task_id: decision.task_id,
+            task_markdown: input.taskMarkdown,
+          })
+          nodeRegistered = true
+        },
+      })
+    } catch (error) {
+      args.store.markDispatchFailed({
+        phase: decision.phase,
+        agent: decision.agent,
+        primary_skill: decision.primary_skill,
+        task_id: decision.task_id,
+        error,
+      })
+      dispatches.push({
+        action: "dispatch_failed",
+        phase: decision.phase,
+        agent: decision.agent,
+        task_id: decision.task_id,
+      })
+      continue
+    }
     if (!nodeRegistered) {
       args.store.addNodeRun({
         phase: decision.phase,
@@ -189,7 +265,9 @@ async function dispatchStart(args: {
   return dispatches
 }
 
-function startDecisions(state: ReturnType<ProjectStore["activateRun"]>, startMode: "new" | "resume" = "new", taskID?: string) {
+const dispatchStart = dispatchWorkflowDecisions
+
+function startDecisions(state: WorkflowState, startMode: "new" | "resume" = "new", taskID?: string) {
   if (startMode === "resume" && state.status === "recovered_unknown" && taskID) {
     return [interruptedRetryDecision(state, taskID)]
   }
@@ -208,7 +286,7 @@ function startDecisions(state: ReturnType<ProjectStore["activateRun"]>, startMod
   })
 }
 
-function interruptedRetryDecision(state: ReturnType<ProjectStore["activateRun"]>, taskID: string) {
+function interruptedRetryDecision(state: WorkflowState, taskID: string) {
   const node = [...state.node_runs]
     .reverse()
     .find((run) => run.status === "interrupted" && (run.task_id === taskID || run.id === taskID))
@@ -225,6 +303,16 @@ function interruptedRetryDecision(state: ReturnType<ProjectStore["activateRun"]>
     primary_skill: node.primary_skill ?? AGENT_SKILL_MAP[node.agent],
     task_id: node.task_id,
     reason: `retry interrupted node ${node.id}`,
+  }
+}
+
+function createPlanDecision() {
+  return {
+    action: "create_session" as const,
+    phase: "plan",
+    agent: "sp-planner" as const,
+    primary_skill: AGENT_SKILL_MAP["sp-planner"],
+    reason: "approved design is ready for planning",
   }
 }
 

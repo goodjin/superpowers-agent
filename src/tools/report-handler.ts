@@ -5,6 +5,7 @@ import { buildControllerUserInputPrompt, buildNodeTaskPacket } from "../session/
 import type { SessionOrchestrator } from "../session/orchestrator"
 import type { ProjectStore } from "../state/store"
 import type { NodeStatus, WorkflowState } from "../state/types"
+import { buildControllerFeedback } from "../controller/feedback"
 
 export type ReportHandlerContext = {
   sessionID?: string
@@ -38,11 +39,20 @@ export function createReportHandler(deps: {
       if (decision.action === "wait_user") {
         const current = deps.store.readCurrent() ?? state
         if (deps.orchestrator.notifyParent) {
-          await deps.orchestrator.notifyParent({
-            sessionID: current.parent_session_id,
-            agent: "super-agent",
-            prompt: buildControllerUserInputPrompt(current),
-          })
+          try {
+            await deps.orchestrator.notifyParent({
+              sessionID: current.parent_session_id,
+              agent: "super-agent",
+              prompt: buildControllerUserInputPrompt(current),
+            })
+          } catch (error) {
+            await progress.report({
+              stage: "workflow_blocked",
+              title: "Superpowers workflow",
+              message: `Parent notification failed: ${errorMessage(error)}`,
+              variant: "error",
+            })
+          }
         }
         await progress.report({
           stage: "waiting_user_input",
@@ -79,24 +89,42 @@ export function createReportHandler(deps: {
         nodeID,
       })
       let nodeRegistered = false
-      const result = await deps.orchestrator.dispatch({
-        project: current.project,
-        runID: current.id,
-        parentSessionID: current.parent_session_id ?? context.sessionID ?? current.session,
-        decision,
-        packet,
-        async onSessionCreated(input) {
-          deps.store.addNodeRun({
-            phase: decision.phase,
-            agent: decision.agent,
-            primary_skill: decision.primary_skill,
-            session_id: input.sessionID,
-            task_id: decision.task_id,
-            task_markdown: input.taskMarkdown,
-          })
-          nodeRegistered = true
-        },
-      })
+      let result
+      try {
+        result = await deps.orchestrator.dispatch({
+          project: current.project,
+          runID: current.id,
+          parentSessionID: current.parent_session_id ?? context.sessionID ?? current.session,
+          decision,
+          packet,
+          async onSessionCreated(input) {
+            deps.store.addNodeRun({
+              phase: decision.phase,
+              agent: decision.agent,
+              primary_skill: decision.primary_skill,
+              session_id: input.sessionID,
+              task_id: decision.task_id,
+              task_markdown: input.taskMarkdown,
+            })
+            nodeRegistered = true
+          },
+        })
+      } catch (error) {
+        deps.store.markDispatchFailed({
+          phase: decision.phase,
+          agent: decision.agent,
+          primary_skill: decision.primary_skill,
+          task_id: decision.task_id,
+          error,
+        })
+        dispatches.push({
+          action: "dispatch_failed",
+          agent: decision.agent,
+          phase: decision.phase,
+          task_id: decision.task_id,
+        })
+        continue
+      }
       if (!nodeRegistered) {
         deps.store.addNodeRun({
           phase: decision.phase,
@@ -121,11 +149,18 @@ export function createReportHandler(deps: {
         state: deps.store.readCurrent(),
         decisions,
         dispatches,
+        controller_feedback: buildControllerFeedback(deps.store.readCurrent() ?? state),
       },
       null,
       2,
     )
   }
+}
+
+function errorMessage(error: unknown): string {
+  if (error instanceof Error && error.message) return error.message
+  if (typeof error === "string" && error) return error
+  return "Unknown error."
 }
 
 function variantForReportStatus(status: NodeStatus): "info" | "success" | "warning" | "error" {

@@ -87,4 +87,57 @@ describe("ProjectStore node runs", () => {
       rmSync(project, { recursive: true, force: true })
     }
   })
+
+  test("late reports from interrupted sessions are audited without changing current state", () => {
+    const project = mkdtempSync(join(tmpdir(), "sp-node-late-report-"))
+    try {
+      const store = createProjectStore(project)
+      const state = store.startRun({
+        workflow: "feature",
+        entrypoint: "feature",
+        goal: "Retry after restart",
+        request: "# Request",
+        proposal: "# Proposal",
+        parentSessionID: "session-main",
+      })
+      const oldNode = store.addNodeRun({
+        phase: "implement",
+        agent: "sp-implementer",
+        primary_skill: "superpowers-test-driven-development",
+        session_id: "session-old",
+        task_id: "T1",
+        task_markdown: "# Old task",
+      })
+      store.recoverInterruptedRunningNodes({ reason: "restart" })
+      const retryNode = store.addNodeRun({
+        phase: "implement",
+        agent: "sp-implementer",
+        primary_skill: "superpowers-test-driven-development",
+        session_id: "session-new",
+        task_id: "T1",
+        task_markdown: "# Retry task",
+      })
+
+      const afterLateReport = store.recordNodeResult({
+        sessionID: "session-old",
+        agent: "sp-implementer",
+        input: {
+          event: "implementation",
+          status: "passed",
+          summary: "Old session finished late.",
+          artifacts: { patch_summary: "Late patch." },
+          gates: { implementation_done: true },
+        },
+      })
+
+      expect(afterLateReport.node_runs.find((run) => run.id === oldNode.id)?.status).toBe("interrupted")
+      expect(afterLateReport.node_runs.find((run) => run.id === retryNode.id)?.status).toBe("running")
+      expect(afterLateReport.artifacts.patch_summary).toBeUndefined()
+      const events = readFileSync(join(store.root, "runs", state.id, "events.jsonl"), "utf8")
+      expect(events).toContain("late_report_ignored")
+      expect(events).toContain(oldNode.id)
+    } finally {
+      rmSync(project, { recursive: true, force: true })
+    }
+  })
 })

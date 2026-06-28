@@ -143,6 +143,27 @@ function recommendedNext(
       source_node_id: state.pending_question.source_node_id,
     }
   }
+  if (state.status === "awaiting_design_approval") {
+    return {
+      action: "approve_or_revise_design",
+      reason: "Candidate design is waiting for approval or revision.",
+    }
+  }
+  if (state.status === "awaiting_plan_approval") {
+    return {
+      action: "approve_or_revise_plan",
+      reason: "Candidate plan is waiting for approval or revision.",
+    }
+  }
+  const dispatchFailed = [...state.node_runs].reverse().find((node) => node.status === "dispatch_failed")
+  if (dispatchFailed) {
+    return {
+      action: "retry_dispatch_or_cancel",
+      reason: "A child dispatch failed before the node could run.",
+      task_id: dispatchFailed.task_id,
+      node_id: dispatchFailed.id,
+    }
+  }
   const interrupted = blockingInterruptedNode(state)
   if (interrupted) {
     return {

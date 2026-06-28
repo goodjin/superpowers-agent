@@ -34,12 +34,12 @@ v4 PRD 在 v3 基础上补齐异常路径闭合设计：
 - 将 feature design 前移到 `sp_prepare(managed_design)`，`sp_start` 批准 design 后进入 planning，批准 plan 后进入 implementation。
 - 增加 controller intake、designer question boundary、controller autonomy principles 和 plugin `controller_feedback` contract。
 - 明确 `draft` 是状态，不是一等文档；未批准 design/plan 是 candidate output，批准后才 promotion 为 canonical artifact。
-- 增加 approval promotion、`start_action`、`expected_state_version` 和 draft node startup recovery 设计。
+- 增加 approval promotion、`start_action`、`expected_state_version` 和 draft node startup recovery 设计；核心 promotion 和 stale approval guard 已在 runtime 落地。
 - 增加 late report 隔离、approved artifact revision 后 stale/invalidation 的处理规则。
 - 明确 progress report 不清空 `pending_question`，也不把 `waiting_user` 改回 `running`。
-- 明确 dispatch failure、notification failure、canceled node、missing task graph 等异常状态的落盘和可见性。
+- 明确 dispatch failure、notification failure、canceled node、missing task graph 等异常状态的落盘和可见性；当前实现已覆盖可捕获 dispatch failure、canceled node、missing task graph 和 late report 隔离。
 - 要求 `sp_start` 返回派发后的 fresh state。
-- 将 v4 标记为后续实现目标；当前代码是否完全符合 v4 仍需实现和测试验证。
+- v4 仍有 prompt contract 层面的软约束，例如 designer question boundary 和 controller intake 质量主要由提示词引导；runtime 已实现核心状态、产物和反馈闭环。
 
 ## V3 Consolidation Notes
 

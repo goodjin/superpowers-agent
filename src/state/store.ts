@@ -3,7 +3,17 @@ import { dirname, join } from "node:path"
 import { randomUUID } from "node:crypto"
 import { applyRecord, createInitialState } from "./transitions"
 import { normalizeTaskGraph } from "./task-graph"
-import type { NodeRun, ResumeInput, WorkflowArtifact, WorkflowEntrypoint, WorkflowKind, WorkflowMode, WorkflowRecord, WorkflowState } from "./types"
+import type {
+  NodeRun,
+  PrepareMode,
+  ResumeInput,
+  WorkflowArtifact,
+  WorkflowEntrypoint,
+  WorkflowKind,
+  WorkflowMode,
+  WorkflowRecord,
+  WorkflowState,
+} from "./types"
 
 export type ProjectStore = {
   root: string
@@ -27,11 +37,31 @@ export type ProjectStore = {
     proposal: string
     parentSessionID: string
     sourceWorkflowID?: string
+    prepareMode?: PrepareMode
   }): WorkflowState
   activateRun(args: {
     runID: string
     parentSessionID: string
   }): WorkflowState
+  approveDesign(args: {
+    runID: string
+    parentSessionID: string
+    approvedBySessionID: string
+  }): WorkflowState
+  approvePlan(args: {
+    runID: string
+    parentSessionID: string
+    approvedBySessionID: string
+  }): WorkflowState
+  markDispatchFailed(args: {
+    phase: string
+    agent: string
+    primary_skill?: string
+    task_id?: string
+    session_id?: string
+    task_markdown?: string
+    error: unknown
+  }): NodeRun
   recoverInterruptedRunningNodes(args: { reason: string }): WorkflowState | null
   consumePendingQuestion(args: {
     runID: string
@@ -164,6 +194,7 @@ export function createProjectStore(project: string, options: ProjectStoreOptions
         goal: args.goal,
         parentSessionID: args.parentSessionID,
         activation: "draft",
+        prepareMode: args.prepareMode,
       })
       initializeRunRoot(runRootFor(root, state.id))
       if (args.sourceWorkflowID) {
@@ -199,9 +230,112 @@ export function createProjectStore(project: string, options: ProjectStoreOptions
         status: wasDraft && current.status === "waiting_user" ? "running" : current.status,
         pending_question: wasDraft ? undefined : current.pending_question,
         updated_at: new Date().toISOString(),
+        state_version: nextStateVersion(),
       }
       persistCurrent(next)
       appendChangelog(root, next.id, `activated ${next.workflow} workflow from ${next.entrypoint}`)
+      return next
+    },
+    approveDesign(args) {
+      const current = this.readRun(args.runID)
+      if (!current) throw new Error(`No Superpowers workflow found for run ${args.runID}.`)
+      if (current.status !== "awaiting_design_approval") {
+        throw new Error(`sp_start approve_design requires awaiting_design_approval; current status is ${current.status}.`)
+      }
+      const candidate = latestCandidateRecord(root, current.id, "design")
+      if (!candidate.record.artifacts?.spec) {
+        throw new Error("sp_start approve_design requires the latest passed design report to include artifacts.spec.")
+      }
+      const now = new Date().toISOString()
+      writeArtifacts(root, current.id, { spec: candidate.record.artifacts.spec })
+      const next: WorkflowState = {
+        ...current,
+        session: args.parentSessionID,
+        parent_session_id: args.parentSessionID,
+        status: "running",
+        phase: "design-approved",
+        current_phase: "design-approved",
+        gates: { ...current.gates, design_approved: true, spec_written: true },
+        artifacts: { ...current.artifacts, spec: "spec.md" },
+        pending_question: undefined,
+        updated_at: now,
+        state_version: nextStateVersion(),
+        history: [
+          ...current.history,
+          {
+            at: now,
+            event: "design_approved",
+            from: current.phase,
+            to: "design-approved",
+            summary: `Approved design from ${candidate.nodeID}.`,
+          },
+        ],
+      }
+      persistCurrent(next)
+      appendEvent(root, next.id, {
+        type: "design_approved",
+        source_node_id: candidate.nodeID,
+        approved_by_session_id: args.approvedBySessionID,
+        approved_at: now,
+        state_version: next.state_version,
+      })
+      appendChangelog(root, next.id, `approved design from ${candidate.nodeID}`)
+      return next
+    },
+    approvePlan(args) {
+      const current = this.readRun(args.runID)
+      if (!current) throw new Error(`No Superpowers workflow found for run ${args.runID}.`)
+      if (current.status !== "awaiting_plan_approval") {
+        throw new Error(`sp_start approve_plan requires awaiting_plan_approval; current status is ${current.status}.`)
+      }
+      const candidate = latestCandidateRecord(root, current.id, "plan")
+      if (!candidate.record.artifacts?.plan) {
+        throw new Error("sp_start approve_plan requires the latest passed plan report to include artifacts.plan.")
+      }
+      if (!candidate.record.task_graph?.tasks.length && current.workflow !== "plan-only") {
+        throw new Error("sp_start approve_plan requires a candidate task_graph before implementation.")
+      }
+      const graph = candidate.record.task_graph ? normalizeTaskGraph(candidate.record.task_graph) : undefined
+      const now = new Date().toISOString()
+      writeArtifacts(root, current.id, { plan: candidate.record.artifacts.plan })
+      if (graph) {
+        writeJson(root, current.id, "task_graph.json", graph)
+        writeJson(root, current.id, "tasks.json", graph)
+      }
+      const next: WorkflowState = {
+        ...current,
+        activation: "active",
+        session: args.parentSessionID,
+        parent_session_id: args.parentSessionID,
+        status: current.workflow === "plan-only" ? "passed" : "running",
+        phase: "plan-complete",
+        current_phase: "plan-complete",
+        gates: { ...current.gates, plan_written: true },
+        artifacts: { ...current.artifacts, plan: "plan.md" },
+        task_graph: graph ?? current.task_graph,
+        pending_question: undefined,
+        updated_at: now,
+        state_version: nextStateVersion(),
+        history: [
+          ...current.history,
+          {
+            at: now,
+            event: "plan_approved",
+            from: current.phase,
+            to: "plan-complete",
+            summary: `Approved plan from ${candidate.nodeID}.`,
+          },
+        ],
+      }
+      persistCurrent(next)
+      appendEvent(root, next.id, {
+        type: "plan_approved",
+        source_node_id: candidate.nodeID,
+        approved_by_session_id: args.approvedBySessionID,
+        approved_at: now,
+        state_version: next.state_version,
+      })
+      appendChangelog(root, next.id, `approved plan from ${candidate.nodeID}`)
       return next
     },
     recoverInterruptedRunningNodes(args) {
@@ -249,6 +383,7 @@ export function createProjectStore(project: string, options: ProjectStoreOptions
         pending_question: undefined,
         node_runs: current.node_runs.map((node) => node.id === sourceNode.id ? resumedNode : node),
         updated_at: now,
+        state_version: nextStateVersion(),
         history: [
           ...current.history,
           {
@@ -275,10 +410,10 @@ export function createProjectStore(project: string, options: ProjectStoreOptions
       if (!current) {
         throw new Error("No active Superpowers workflow. Call sp_status or sp_prepare first.")
       }
-      writeArtifacts(root, current.id, record.artifacts ?? {})
+      if (!isDraftCandidateRecord(current, record)) writeArtifacts(root, current.id, record.artifacts ?? {})
       const nodeIndex = current.history.filter((entry) => entry.event !== "created").length + 1
       writeNodeRecord(root, current.id, nodeIndex, record)
-      if (record.task_graph) {
+      if (record.task_graph && !isDraftCandidateRecord(current, record)) {
         const normalized = normalizeTaskGraph(record.task_graph)
         writeJson(root, current.id, "task_graph.json", normalized)
       }
@@ -292,11 +427,28 @@ export function createProjectStore(project: string, options: ProjectStoreOptions
       if (!current) {
         throw new Error("No active Superpowers workflow. Call sp_start first.")
       }
+      const staleSessionNode = args.sessionID
+        ? current.node_runs.find((run) => run.session_id === args.sessionID && run.status !== "running")
+        : undefined
+      if (staleSessionNode && !args.nodeID) {
+        const ignoredNodeID = `${staleSessionNode.id}-late-${Date.now()}`
+        writeNodeRecordByID(root, current.id, ignoredNodeID, args.input)
+        appendEvent(root, current.id, {
+          type: "late_report_ignored",
+          source_node_id: staleSessionNode.id,
+          session_id: args.sessionID,
+          event: args.input.event,
+          status: args.input.status,
+          summary: args.input.summary,
+        })
+        appendChangelog(root, current.id, `ignored late report from ${staleSessionNode.id}: ${args.input.event} ${args.input.status}`)
+        return current
+      }
       const nodeID = resolveNodeID(current, args)
-      writeArtifacts(root, current.id, args.input.artifacts ?? {})
+      if (!isDraftCandidateRecord(current, args.input)) writeArtifacts(root, current.id, args.input.artifacts ?? {})
       writeNodeRecordByID(root, current.id, nodeID, args.input)
       writeReportForNode(root, current, nodeID, args.input)
-      if (args.input.task_graph) {
+      if (args.input.task_graph && !isDraftCandidateRecord(current, args.input)) {
         const normalized = normalizeTaskGraph(args.input.task_graph)
         writeJson(root, current.id, "task_graph.json", normalized)
         writeJson(root, current.id, "tasks.json", normalized)
@@ -336,18 +488,20 @@ export function createProjectStore(project: string, options: ProjectStoreOptions
         const matchesSession = args.sessionID && run.session_id === args.sessionID
         const matchesWorkflow = !args.taskID && !args.sessionID
         if (!matchesTask && !matchesSession && !matchesWorkflow) return run
-        if (!["running", "blocked", "needs_user", "interrupted"].includes(run.status)) return run
+        if (!["running", "blocked", "needs_user", "interrupted", "dispatch_failed", "notification_failed"].includes(run.status)) return run
         return {
           ...run,
-          status: "blocked" as const,
+          status: "canceled" as const,
           closed_at: now,
+          ended_at: now,
         }
       })
       const next: WorkflowState = {
         ...current,
-        status: args.taskID || args.sessionID ? current.status : "canceled",
+        status: args.taskID || args.sessionID ? "waiting_user_decision" : "canceled",
         node_runs: nodeRuns,
         updated_at: now,
+        state_version: nextStateVersion(),
         history: [
           ...current.history,
           {
@@ -396,6 +550,7 @@ export function createProjectStore(project: string, options: ProjectStoreOptions
         current_phase: args.phase,
         node_runs: [...current.node_runs, node],
         updated_at: new Date().toISOString(),
+        state_version: nextStateVersion(),
       }
       writeNodeTask(root, current.id, node.id, args.task_markdown)
       writeReportTask(root, current.id, node.task_id ?? node.id, args.task_markdown)
@@ -410,6 +565,58 @@ export function createProjectStore(project: string, options: ProjectStoreOptions
       appendChangelog(root, current.id, `dispatch ${node.agent} ${node.task_id ?? node.phase} to ${node.session_id}`)
       return node
     },
+    markDispatchFailed(args) {
+      const current = this.readCurrent()
+      if (!current) {
+        throw new Error("No active Superpowers workflow. Call sp_start first.")
+      }
+      const now = new Date().toISOString()
+      const node: NodeRun = {
+        id: nextDispatchNodeID(current, args.phase, args.task_id, 1),
+        task_id: args.task_id,
+        phase: args.phase,
+        agent: args.agent,
+        primary_skill: args.primary_skill,
+        session_id: args.session_id ?? "dispatch_failed",
+        status: "dispatch_failed",
+        attempts: 1,
+        started_at: now,
+        reported_at: now,
+        closed_at: now,
+        ended_at: now,
+      }
+      const next: WorkflowState = {
+        ...current,
+        status: "waiting_user_decision",
+        phase: "dispatch-failed",
+        current_phase: "dispatch-failed",
+        node_runs: [...current.node_runs, node],
+        updated_at: now,
+        state_version: nextStateVersion(),
+        history: [
+          ...current.history,
+          {
+            at: now,
+            event: "dispatch_failed",
+            from: current.phase,
+            to: "dispatch-failed",
+            summary: errorMessage(args.error),
+          },
+        ],
+      }
+      writeNodeTask(root, current.id, node.id, args.task_markdown ?? `# Dispatch failed\n\n${errorMessage(args.error)}`)
+      persistCurrent(next)
+      appendEvent(root, current.id, {
+        type: "dispatch_failed",
+        node_id: node.id,
+        task_id: node.task_id,
+        agent: node.agent,
+        session_id: node.session_id,
+        error: errorMessage(args.error),
+      })
+      appendChangelog(root, current.id, `dispatch failed for ${node.agent} ${node.task_id ?? node.phase}: ${errorMessage(args.error)}`)
+      return node
+    },
     reset() {
       const currentPath = join(root, "current.json")
       if (existsSync(currentPath)) rmSync(currentPath)
@@ -422,7 +629,11 @@ export function createProjectStore(project: string, options: ProjectStoreOptions
 function readStateFromDisk(root: string, runID: string): WorkflowState | null {
   const statePath = join(root, "runs", runID, "state.json")
   if (!existsSync(statePath)) return null
-  return JSON.parse(readFileSync(statePath, "utf8")) as WorkflowState
+  const state = JSON.parse(readFileSync(statePath, "utf8")) as WorkflowState
+  return {
+    ...state,
+    state_version: state.state_version ?? `${state.updated_at}:legacy`,
+  }
 }
 
 type StartupReconciliation = {
@@ -453,6 +664,7 @@ function reconcileStartupState(state: WorkflowState, args: { reason: string }): 
       ...state,
       status: "recovered_unknown",
       updated_at: now,
+      state_version: nextStateVersion(),
       node_runs: state.node_runs.map((node) => {
         if (!interruptedIDs.has(node.id)) return node
         return {
@@ -507,6 +719,10 @@ function resumableStatus(status: WorkflowState["status"]): WorkflowState["status
   return "running"
 }
 
+function nextStateVersion(): string {
+  return `${new Date().toISOString()}:${randomUUID()}`
+}
+
 function createWorkflowState(args: {
   id: string
   project: string
@@ -515,6 +731,7 @@ function createWorkflowState(args: {
   goal: string
   parentSessionID: string
   activation: WorkflowState["activation"]
+  prepareMode?: PrepareMode
 }): WorkflowState {
   const now = new Date().toISOString()
   const mode = modeForWorkflow(args.workflow, args.entrypoint)
@@ -524,6 +741,7 @@ function createWorkflowState(args: {
     session: args.parentSessionID,
     parent_session_id: args.parentSessionID,
     activation: args.activation,
+    prepare_mode: args.prepareMode,
     workflow: args.workflow,
     entrypoint: args.entrypoint,
     limited_context: args.entrypoint !== args.workflow,
@@ -534,6 +752,7 @@ function createWorkflowState(args: {
     goal: args.goal,
     created_at: now,
     updated_at: now,
+    state_version: `${now}:created`,
     gates: {},
     artifacts: {},
     node_runs: [],
@@ -606,6 +825,31 @@ function writeArtifacts(root: string, run: string, artifacts: NonNullable<Workfl
     const flatName = flatArtifactFilename(name)
     if (flatName) writeRunMarkdown(root, run, flatName, body)
   }
+}
+
+function isDraftCandidateRecord(state: WorkflowState, record: WorkflowRecord): boolean {
+  return state.activation === "draft" && (record.event === "design" || record.event === "plan")
+}
+
+function latestCandidateRecord(
+  root: string,
+  run: string,
+  event: Extract<WorkflowRecord["event"], "design" | "plan">,
+): { nodeID: string; record: WorkflowRecord } {
+  const nodesRoot = join(root, "runs", run, "nodes")
+  if (!existsSync(nodesRoot)) throw new Error(`No candidate ${event} records found for run ${run}.`)
+  const candidates = readdirSync(nodesRoot, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => entry.name)
+    .sort()
+    .reverse()
+  for (const nodeID of candidates) {
+    const recordPath = join(nodesRoot, nodeID, "record.json")
+    if (!existsSync(recordPath)) continue
+    const record = JSON.parse(readFileSync(recordPath, "utf8")) as WorkflowRecord
+    if (record.event === event && record.status === "passed") return { nodeID, record }
+  }
+  throw new Error(`No passed candidate ${event} record found for run ${run}.`)
 }
 
 function copySourceArtifacts(
@@ -833,15 +1077,31 @@ function buildPendingQuestion(args: {
       source_node_id: args.nodeID,
     }
   }
+  if (args.current.activation === "draft" && args.input.event === "design" && args.input.status === "passed") {
+    return {
+      prompt: "Design candidate is ready. Review the candidate output, then approve or request revision before planning.",
+      options: [
+        { label: "approve_design", description: "Promote the candidate design to artifacts/spec.md and start planning." },
+        { label: "revise_design", description: "Ask the designer to revise the candidate design." },
+      ],
+      source_node_id: args.nodeID,
+    }
+  }
   if (args.current.activation === "draft" && args.input.event === "plan" && args.input.status === "passed") {
     return {
-      prompt: "Plan and task graph are ready. Review the artifacts, decide whether changes are needed, and confirm before calling sp_start.",
+      prompt: "Plan candidate and task graph are ready. Review them, then approve or request revision before implementation.",
       options: [
-        { label: "start", description: "Start execution with the current plan." },
-        { label: "revise", description: "Revise the plan before execution." },
+        { label: "approve_plan", description: "Promote the candidate plan to canonical artifacts and start execution." },
+        { label: "revise_plan", description: "Ask the planner to revise the candidate plan." },
       ],
       source_node_id: args.nodeID,
     }
   }
   return args.next.pending_question
+}
+
+function errorMessage(error: unknown): string {
+  if (error instanceof Error && error.message) return error.message
+  if (typeof error === "string" && error) return error
+  return "Unknown error."
 }

@@ -1,5 +1,6 @@
 import { tool, type ToolDefinition } from "@opencode-ai/plugin/tool"
 import type { ProjectStore } from "../state/store"
+import { buildControllerFeedback } from "../controller/feedback"
 
 export function createCancelTool(store: ProjectStore): ToolDefinition {
   return tool({
@@ -17,7 +18,7 @@ export function createCancelTool(store: ProjectStore): ToolDefinition {
         sessionID: args.session_id,
         reason: args.reason,
       })
-      return JSON.stringify({ state }, null, 2)
+      return JSON.stringify({ state, controller_feedback: buildControllerFeedback(state) }, null, 2)
     },
   })
 }

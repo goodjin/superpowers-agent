@@ -137,7 +137,7 @@ describe("sp_prepare and sp_start tools", () => {
     }
   })
 
-  test("sp_prepare creates a prepared workflow without dispatching node work", async () => {
+  test("sp_prepare creates a managed design draft and dispatches the designer node", async () => {
     const project = mkdtempSync(join(tmpdir(), "sp-prepare-"))
     try {
       const store = createProjectStore(project)
@@ -147,8 +147,8 @@ describe("sp_prepare and sp_start tools", () => {
           async dispatch() {
             return {
               action: "create_session",
-              session_id: "session-planner",
-              task_markdown: "# Planner task",
+              session_id: "session-designer",
+              task_markdown: "# Designer task",
             }
           },
         },
@@ -166,9 +166,24 @@ describe("sp_prepare and sp_start tools", () => {
 
       const result = JSON.parse(toolOutput(output))
       expect(result.state.activation).toBe("draft")
-      expect(result.state.current_phase).toBe("plan")
-      expect(store.readCurrent()?.node_runs).toEqual([])
-      expect(result.next).toContain("sp_start")
+      expect(result.prepare_mode).toBe("managed_design")
+      expect(result.state.current_phase).toBe("design")
+      expect(result.dispatches).toEqual([
+        {
+          action: "create_session",
+          phase: "design",
+          agent: "sp-designer",
+          task_id: undefined,
+          session_id: "session-designer",
+        },
+      ])
+      expect(store.readCurrent()?.node_runs.at(-1)).toMatchObject({
+        phase: "design",
+        agent: "sp-designer",
+        session_id: "session-designer",
+        status: "running",
+      })
+      expect(result.next).toContain("approve_design")
     } finally {
       rmSync(project, { recursive: true, force: true })
     }
@@ -260,6 +275,144 @@ describe("sp_prepare and sp_start tools", () => {
         },
       ])
       expect(store.readCurrent()?.node_runs.some((run) => run.agent === "sp-implementer")).toBe(true)
+    } finally {
+      rmSync(project, { recursive: true, force: true })
+    }
+  })
+
+  test("v4 approval promotion keeps candidate outputs out of canonical artifacts until approval", async () => {
+    const project = mkdtempSync(join(tmpdir(), "sp-start-v4-approval-"))
+    try {
+      const store = createProjectStore(project)
+      const prepared = store.prepareRun({
+        workflow: "feature",
+        entrypoint: "feature",
+        goal: "Add workflow gates",
+        request: "# Request\n\nAdd workflow gates.",
+        proposal: "# Proposal\n\nPrepare feature workflow.",
+        parentSessionID: "session-main",
+        prepareMode: "managed_design",
+      })
+      const design = store.addNodeRun({
+        phase: "design",
+        agent: "sp-designer",
+        primary_skill: "superpowers-brainstorming",
+        session_id: "session-design",
+        task_markdown: "# Design task",
+      })
+      const afterDesign = store.recordNodeResult({
+        nodeID: design.id,
+        sessionID: "session-design",
+        agent: "sp-designer",
+        input: {
+          event: "design",
+          status: "passed",
+          summary: "Design ready.",
+          artifacts: { spec: "# Spec\n\nApproved behavior." },
+          gates: { design_approved: true, spec_written: true },
+        },
+      })
+      const runRoot = join(store.root, "runs", prepared.id)
+      expect(afterDesign.status).toBe("awaiting_design_approval")
+      expect(afterDesign.artifacts.spec).toBeUndefined()
+      expect(existsSync(join(runRoot, "artifacts", "spec.md"))).toBe(false)
+      expect(readFileSync(join(runRoot, "nodes", design.id, "record.json"), "utf8")).toContain("Approved behavior")
+
+      const dispatched: string[] = []
+      const start = createStartTool(store, {
+        async dispatch(args) {
+          dispatched.push(args.decision.agent)
+          return {
+            action: args.decision.action,
+            session_id: "session-planner",
+            task_markdown: "# Planner task",
+          }
+        },
+      })
+      const designApproved = JSON.parse(toolOutput(await start.execute({
+        run_id: prepared.id,
+        start_action: "approve_design",
+        expected_state_version: afterDesign.state_version,
+      }, toolContext)))
+      expect(dispatched).toEqual(["sp-planner"])
+      expect(designApproved.controller_feedback.artifact_mode).toBe("canonical")
+      expect(readFileSync(join(runRoot, "artifacts", "spec.md"), "utf8")).toContain("Approved behavior")
+      expect(readFileSync(join(runRoot, "events.jsonl"), "utf8")).toContain("design_approved")
+
+      const planner = store.readCurrent()?.node_runs.find((run) => run.agent === "sp-planner")
+      expect(planner?.session_id).toBe("session-planner")
+      const afterPlan = store.recordNodeResult({
+        nodeID: planner?.id,
+        sessionID: "session-planner",
+        agent: "sp-planner",
+        input: {
+          event: "plan",
+          status: "passed",
+          summary: "Plan ready.",
+          artifacts: { plan: "# Plan\n\nImplement T1." },
+          gates: { plan_written: true },
+          task_graph: {
+            tasks: [{ id: "T1", title: "Implement gates", summary: "Add gate implementation.", depends_on: [] }],
+          },
+        },
+      })
+      expect(afterPlan.status).toBe("awaiting_plan_approval")
+      expect(afterPlan.task_graph).toBeUndefined()
+      expect(existsSync(join(runRoot, "artifacts", "plan.md"))).toBe(false)
+
+      const planApproved = JSON.parse(toolOutput(await start.execute({
+        run_id: prepared.id,
+        start_action: "approve_plan",
+        expected_state_version: afterPlan.state_version,
+      }, toolContext)))
+      expect(planApproved.dispatches).toEqual([
+        {
+          action: "create_session",
+          phase: "implement",
+          agent: "sp-implementer",
+          task_id: "T1",
+          session_id: "session-planner",
+        },
+      ])
+      expect(store.readCurrent()?.activation).toBe("active")
+      expect(store.readCurrent()?.task_graph?.tasks[0].id).toBe("T1")
+      expect(readFileSync(join(runRoot, "artifacts", "plan.md"), "utf8")).toContain("Implement T1")
+      expect(readFileSync(join(runRoot, "task_graph.json"), "utf8")).toContain("Implement gates")
+      expect(readFileSync(join(runRoot, "events.jsonl"), "utf8")).toContain("plan_approved")
+    } finally {
+      rmSync(project, { recursive: true, force: true })
+    }
+  })
+
+  test("sp_start expected_state_version rejects stale approval without dispatching", async () => {
+    const project = mkdtempSync(join(tmpdir(), "sp-start-v4-stale-version-"))
+    try {
+      const store = createProjectStore(project)
+      const state = store.prepareRun({
+        workflow: "feature",
+        entrypoint: "feature",
+        goal: "Add workflow gates",
+        request: "# Request",
+        proposal: "# Proposal",
+        parentSessionID: "session-main",
+        prepareMode: "proposal_only",
+      })
+      const start = createStartTool(store, {
+        async dispatch() {
+          throw new Error("stale approval must not dispatch")
+        },
+      })
+
+      const output = await start.execute({
+        run_id: state.id,
+        expected_state_version: "stale-version",
+      }, toolContext)
+      const result = JSON.parse(toolOutput(output))
+
+      expect(result.dispatches).toEqual([])
+      expect(result.controller_feedback.outcome).toBe("blocked")
+      expect(result.controller_feedback.blocking_reason).toContain("stale")
+      expect(store.readCurrent()?.node_runs).toEqual([])
     } finally {
       rmSync(project, { recursive: true, force: true })
     }

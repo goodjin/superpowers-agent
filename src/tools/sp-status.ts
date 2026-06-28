@@ -2,8 +2,19 @@ import { tool, type ToolDefinition } from "@opencode-ai/plugin/tool"
 import { buildWorkflowStatusSnapshot } from "../status/workflow-status"
 import type { ProjectStore } from "../state/store"
 import type { WorkflowState } from "../state/types"
+import { buildControllerFeedback } from "../controller/feedback"
 
-const INCOMPLETE_STATUSES = new Set<WorkflowState["status"]>(["intake", "running", "waiting_user", "blocked", "failed", "recovered_unknown"])
+const INCOMPLETE_STATUSES = new Set<WorkflowState["status"]>([
+  "intake",
+  "running",
+  "awaiting_design_approval",
+  "awaiting_plan_approval",
+  "waiting_user",
+  "waiting_user_decision",
+  "blocked",
+  "failed",
+  "recovered_unknown",
+])
 
 export function createStatusTool(store: ProjectStore): ToolDefinition {
   return tool({
@@ -40,6 +51,7 @@ export function createStatusTool(store: ProjectStore): ToolDefinition {
           runtime: snapshot?.runtime,
           durable: snapshot?.durable,
           recommended_next: snapshot?.recommended_next,
+          controller_feedback: current ? buildControllerFeedback(current) : undefined,
           incomplete_workflows: history,
         },
         null,

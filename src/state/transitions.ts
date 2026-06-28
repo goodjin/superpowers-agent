@@ -37,6 +37,7 @@ export function createInitialState(args: {
     goal: args.goal,
     created_at: now,
     updated_at: now,
+    state_version: `${now}:created`,
     gates: args.gates ?? {},
     artifacts: {},
     node_runs: [],
@@ -75,7 +76,8 @@ export function applyRecord(state: WorkflowState, record: WorkflowRecord): Workf
   }
 
   const now = new Date().toISOString()
-  const artifactRefs = normalizeArtifactRefs(record.artifacts ?? {})
+  const candidateOnly = isDraftCandidateRecord(state, record)
+  const artifactRefs = candidateOnly ? {} : normalizeArtifactRefs(record.artifacts ?? {})
   const nextPhase = phaseForRecord(state, record)
   return {
     ...state,
@@ -83,9 +85,10 @@ export function applyRecord(state: WorkflowState, record: WorkflowRecord): Workf
     current_phase: nextPhase,
     status: statusForRecord(state, record),
     updated_at: now,
-    gates: { ...state.gates, ...gateUpdates },
+    state_version: `${now}:${state.history.length + 1}`,
+    gates: candidateOnly ? state.gates : { ...state.gates, ...gateUpdates },
     artifacts: { ...state.artifacts, ...artifactRefs },
-    task_graph: record.task_graph ?? state.task_graph,
+    task_graph: candidateOnly ? state.task_graph : record.task_graph ?? state.task_graph,
     pending_question: record.status === "needs_user" ? record.question : undefined,
     history: [
       ...state.history,
@@ -119,11 +122,14 @@ function workflowForMode(mode: WorkflowMode): WorkflowKind {
 }
 
 function statusForRecord(state: WorkflowState, record: WorkflowRecord): WorkflowState["status"] {
-  if (record.status === "progress") return state.status === "waiting_user" ? "running" : state.status
+  if (record.status === "progress") return state.status
   if (record.status === "needs_user") return "waiting_user"
   if (record.status === "blocked") return "blocked"
   if (record.status === "failed") return "failed"
-  if (state.activation === "draft" && record.event === "plan" && record.status === "passed") return "waiting_user"
+  if (state.activation === "draft" && record.event === "design" && record.status === "passed") return "awaiting_design_approval"
+  if (state.activation === "draft" && record.event === "plan" && record.status === "passed") {
+    return record.task_graph?.tasks.length || state.workflow === "plan-only" ? "awaiting_plan_approval" : "waiting_user_decision"
+  }
   if (state.workflow === "plan-only" && record.event === "plan" && record.status === "passed") return "passed"
   if (record.event === "finish" && record.status === "passed") return "passed"
   return "running"
@@ -169,6 +175,7 @@ function phaseForRecord(state: WorkflowState, record: WorkflowRecord): string {
     case "intake":
       return "confirmed"
     case "design":
+      if (state.activation === "draft" && record.status === "passed") return "awaiting-design-approval"
       return record.status === "passed" ? "design-complete" : "design-retry"
     case "plan":
       if (record.status !== "passed") return "plan-retry"
@@ -194,4 +201,8 @@ function phaseForRecord(state: WorkflowState, record: WorkflowRecord): string {
     default:
       return initialPhase(state.mode)
   }
+}
+
+function isDraftCandidateRecord(state: WorkflowState, record: WorkflowRecord): boolean {
+  return state.activation === "draft" && (record.event === "design" || record.event === "plan")
 }
