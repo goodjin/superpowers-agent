@@ -8,7 +8,7 @@ product docs 记录 Superpowers Controller 的产品设计版本、PRD 来源和
 
 当前 PRD 源：
 
-- `docs/superpowers/specs/2026-06-27-controller-prd-v4.md`
+- `docs/superpowers/specs/2026-06-28-controller-prd-v5.md`
 
 历史版本：
 
@@ -16,6 +16,7 @@ product docs 记录 Superpowers Controller 的产品设计版本、PRD 来源和
 - v2 / final design: `docs/superpowers/specs/2026-06-11-controller-final-design.md`
 - v2 migration plan: `docs/superpowers/plans/2026-06-11-controller-final-architecture-migration.md`
 - v3 / current implementation consolidation: `docs/superpowers/specs/2026-06-27-controller-prd-v3.md`
+- v4 / recovery closure and managed preparation: `docs/superpowers/specs/2026-06-27-controller-prd-v4.md`
 
 ## Version Policy
 
@@ -23,6 +24,17 @@ product docs 记录 Superpowers Controller 的产品设计版本、PRD 来源和
 - 实现前的范围说明进入 `docs/features/` 或 `docs/bugfix/`。
 - 实现后的模块契约进入 `docs/modules/`。
 - 如果 PRD 和模块文档冲突，先以当前代码和模块文档核验，再回写 PRD。
+
+## V5 Dynamic Workflow Notes
+
+v5 PRD 将产品目标从固定 workflow definition 调整为 controller-generated workflow spec：
+
+- 插件不再把 `feature`、`debug`、`plan-only`、`review`、`verify-finish`、`parallel-investigate` 等固定流程作为主决策来源。
+- controller 根据用户需求生成 `GeneratedWorkflowSpec`，其中包含 nodes、edges、agent、report contract、completion policy 和 fallback policy。
+- 插件只提供 workflow 建议、agent catalog、状态机运行时、派发控制、`sp_report` 结果处理、恢复、取消和可见性。
+- 每个 agent 完成后应调用 `sp_report`。如果 agent 没有调用，插件生成 fallback summary result，反馈 controller 决定 retry、接受 partial、取消或修改 workflow。
+- v5 不新增 public tool，仍使用 `sp_status`、`sp_prepare`、`sp_start`、`sp_cancel`、`sp_report`。
+- v5 是新的设计目标；当前模块文档仍描述已实现的 v4 runtime contract，直到后续实现落地后再同步更新。
 
 ## V4 Recovery Closure Notes
 
