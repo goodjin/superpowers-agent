@@ -270,6 +270,7 @@ sp_report
 
 - 不修改状态。
 - 返回当前 workflow、node 状态、最近 report/fallback、可运行 node、阻塞原因、`controller_feedback`。
+- 当 workflow 处于 `waiting_controller_decision`、`blocked`、`failed`、`recovered_unknown`、fallback 或 expansion validation failed 时，返回 `allowed_controller_decisions`，并给出每个 decision 对应的 recommended tool payload。
 - `include_progress=true` 时返回按需 `progress_digest`。
 - `include_capabilities=true` 时返回 agent catalog、schema capability、built-in workflow templates 和 workflow examples。
 
@@ -368,6 +369,12 @@ type SpStartInput =
       node_id?: string
       expected_state_version?: number
     }
+  | {
+      action: "resolve_controller_decision"
+      prepared_task_id: string
+      decision: ControllerDecision
+      expected_state_version?: number
+    }
 
 type StartConfig =
   | BuiltInWorkflowStartConfig
@@ -399,6 +406,15 @@ type AutoExpansionOverride = {
   allow: boolean
   reason?: string
 }
+
+type ControllerDecision =
+  | { kind: "continue_existing_graph"; reason: string }
+  | { kind: "retry_node"; node_id: string; reason: string; reuse_session?: boolean }
+  | { kind: "apply_workflow_patch"; patch: WorkflowExpansionPatch; reason: string }
+  | { kind: "replace_orchestration"; orchestration: WorkflowOrchestration; reason: string }
+  | { kind: "accept_partial_result"; node_id?: string; reason: string; evidence_refs: string[] }
+  | { kind: "mark_blocked"; reason: string; required_user_action?: string }
+  | { kind: "request_reprepare"; reason: string }
 ```
 
 行为：
@@ -413,6 +429,9 @@ type AutoExpansionOverride = {
 - `fallback_summary_ready`: 默认返回 controller decision，除非 spec 明确允许自动继续。
 - `recovered_unknown`: 要求 controller 选择 retry、cancel 或 inspect。
 - `expansion_ready`: 如果 auto expansion policy 允许，且 expansion 由已允许的 node 产生并校验通过，自动应用并派发新 runnable node；不回到 controller。
+- `resolve_controller_decision`: 只接受 `sp_status.allowed_controller_decisions` 中允许的 decision kind；插件校验 state version、node id、artifact、workflow patch 和 policy 后再写入 state 并推进。
+- `accept_partial_result`: 只能在 fallback summary、只读调查、用户明确接受 partial 或 workflow policy 允许 partial close 时使用；必须记录 evidence refs 和 caveat，不能冒充完整成功。
+- `request_reprepare`: 不直接修改 workflow，只返回 controller 需要重新调用 `sp_prepare` 的结构化反馈。
 
 `sp_start` 调度 child prompt 后返回，不等待 child session 完整跑完。
 
@@ -491,6 +510,35 @@ status 语义：
 - 写入取消状态、原因和 state version。
 - 对 canceled/interrupted/dispatch_failed node 的 late report 只作为审计，不覆盖 current state。
 - 取消后恢复必须读取当前 state、`workflow-spec.json` 和 events，不能回到固定 entrypoint。
+
+### 5.6 Tool Sufficiency For Flexible Control
+
+五个 public tools 仍然足够，但前提是它们按下面的控制契约实现：
+
+| 主控需要做的事 | 工具 | 充分性要求 |
+|---|---|---|
+| 对齐事实、知道为什么不能自动继续 | `sp_status` | 必须返回 runtime fact、durable note、attention、blocking reason、latest report/fallback、progress digest、`allowed_controller_decisions` 和 recommended payload。 |
+| 准备或重新准备任务 | `sp_prepare` | 必须能基于 controller 新澄清的目标重新生成 prepare state 和 artifacts；需要 design 时可在 prepare 阶段调度 designer。 |
+| 启动预期流程 | `sp_start(start_prepared_task)` | 必须能接收 built-in workflow id 或 custom orchestration，并规范化为 `workflow-spec.json`。 |
+| 提交主控裁决 | `sp_start(resolve_controller_decision)` | 必须能表达 continue、retry、apply patch、replace orchestration、accept partial、mark blocked、request reprepare 等控制决策。 |
+| 恢复用户输入 | `sp_start(resume_input)` | 必须恢复原 child session，不创建替代节点。 |
+| 停止或废弃错误路径 | `sp_cancel` | 必须写入取消/superseded fact，并隔离 late report。 |
+| 接收 node 事实 | `sp_report` | 只允许 node 报告 progress/result/question/artifact/expansion，不允许 node 提交 control-plane 决策。 |
+
+不新增 `sp_decide` / `sp_next` 的原因：
+
+- `sp_status` 已经是事实读取和 controller feedback 入口。
+- `sp_start` 是“主控确认后推进 runtime”的唯一写入口，适合承载 controller decision。
+- 新增决策工具会扩大 public surface，增加 controller 选择工具时的歧义。
+- `sp_start(action="resolve_controller_decision")` 可以用 `expected_state_version` 防止 stale decision，仍保持工具语义一致。
+
+因此，灵活控制的核心不是增加工具数量，而是要求：
+
+1. plugin 在可自动推进时自动推进。
+2. plugin 在不能确定时进入 `waiting_controller_decision`。
+3. `sp_status` 明确告诉 controller 可以做哪些 decision。
+4. controller 通过 `sp_start(resolve_controller_decision)` 提交选择。
+5. plugin 校验选择后推进、阻塞、重新准备或取消。
 
 ## 6. Prepare State And Start Config
 
@@ -811,6 +859,15 @@ fallback summary 是部分证据。默认不能驱动成功路径。
 
 ## 9. Runtime Decision Model
 
+runtime 的第一原则：
+
+```text
+if current state + workflow-spec + report/fallback can produce exactly one safe next step:
+  plugin advances automatically
+else:
+  plugin enters waiting_controller_decision and returns allowed_controller_decisions
+```
+
 plugin 每次只根据四类输入计算下一步：
 
 1. 当前 `WorkflowState`。
@@ -849,6 +906,16 @@ transition 输出只能是：
 - agent 不存在或权限不可用。
 - prepare state、启动配置或 `workflow-spec.json` 不完整。
 - startup recovery 后状态不能安全判断。
+
+`waiting_controller_decision` 的 state 必须包含：
+
+- `decision_reason`: 为什么不能自动继续。
+- `decision_source`: 触发来源，例如 report、fallback、recovery、validation、artifact、user。
+- `evidence_refs`: 相关 report、fallback summary、artifact、node id、session id 或 progress digest。
+- `allowed_controller_decisions`: 可以提交给 `sp_start(resolve_controller_decision)` 的 decision kind 和最小 payload。
+- `unsafe_decisions`: 被拒绝的常见动作及原因，例如 artifact 缺失时不能 continue、stale state 不能 approve。
+
+这样 controller 不需要猜插件还能做什么，也不需要理解插件内部状态机。它只需要读取事实、结合用户目标选择一个 allowed decision。
 
 ## 10. Progress And TUI
 

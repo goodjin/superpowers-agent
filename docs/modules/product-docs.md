@@ -44,6 +44,7 @@ v5 PRD 将产品目标从固定 workflow definition 调整为 prepare-first task
 - v5 增加 document contract：`request.md`、`spec.md`、`plan.md`、`task_graph.json`、`tasks.json`、task report 和 verification log 是 run 目录下的 workflow artifacts，由插件读取并内联传给后续 node。
 - v5 展示策略复用 OpenCode 原生 child session：详细执行过程留在 child session timeline，主会话只展示确认、摘要、入口、attention 和按需 progress digest。
 - v5 增加异常场景矩阵：系统重启、中断、失败、stalled、无 `sp_report`、`needs_user`、扩展校验失败、artifact 缺失和 late report 都要闭合到明确 controller decision。
+- v5 public tools 仍保持五个，但 `sp_status` 必须返回 `allowed_controller_decisions`，`sp_start(resolve_controller_decision)` 必须承载主控对异常路径的裁决；优先扩展 `ControllerDecision` union，不新增 `sp_decide`。
 - 每个 agent 完成后应调用 `sp_report`。如果 agent 没有调用，插件生成 fallback summary result，反馈 controller 决定 retry、接受 partial、取消或修改 workflow。
 - v5 不新增 public tool，仍使用 `sp_status`、`sp_prepare`、`sp_start`、`sp_cancel`、`sp_report`。
 - v5 是新的设计目标；当前模块文档仍描述已实现的 v4 runtime contract，直到后续实现落地后再同步更新。

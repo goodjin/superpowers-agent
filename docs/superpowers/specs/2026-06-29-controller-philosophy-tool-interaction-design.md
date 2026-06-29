@@ -153,12 +153,14 @@ When runtime state is confusing, call sp_status and follow controller_feedback. 
 
 - 不修改 workflow state。
 - 返回 current workflow、node 状态、最近 report/fallback、可运行节点、阻塞原因、progress digest、controller_feedback 和 allowed tool calls。
+- 当 plugin 不能安全自动继续时，返回 `allowed_controller_decisions`，包含每个决策的 reason、risk、最小 payload 和推荐工具调用。
 - v5 中还可以返回 agent catalog、workflow schema、built-in workflow templates 和常用 workflow 示例。它们是确定性能力说明，不是插件智能规划结果。
 
 插件与大模型交互：
 
 - controller 调用工具后，插件同步返回结构化 JSON。
 - 大模型只根据返回值解释状态和选择下一步工具，不应靠自己记忆覆盖 `sp_status`。
+- 大模型提交裁决前，应只选择 `sp_status.allowed_controller_decisions` 中允许的动作；如果用户目标需要的动作不在列表里，先重新 `sp_prepare` 或向用户说明阻塞。
 - `include_progress=true` 时返回按需进度摘要，可用于主会话灰色 tool result 或用户主动查看，不应长期注入 prompt。
 
 ### 4.2 `sp_prepare`
@@ -218,11 +220,14 @@ When runtime state is confusing, call sp_status and follow controller_feedback. 
 - 如果已有 running node，不重复派发，返回 wait 和当前状态。
 - 如果存在已校验的 report-driven expansion，且 auto expansion policy 允许，插件应用 expansion 并派发新的 runnable node，不要求 controller 重新规划。
 - 如果 auto expansion policy 禁止，插件不应用 report 中的新任务，只保存 artifact，并按 `workflow-spec.json` 的 completion policy 结束或继续已有节点。
+- `resolve_controller_decision` 时，插件只接受 `sp_status.allowed_controller_decisions` 中列出的 decision kind，例如 continue、retry node、apply workflow patch、replace orchestration、accept partial、mark blocked 或 request reprepare。
+- accept partial 必须记录 evidence refs 和 caveat，不能伪装成完整成功。
 - 返回 fresh state，而不是 dispatch 前的旧快照。
 
 插件与大模型交互：
 
 - controller 只调用 `sp_start` 表达已确认的启动/恢复/重试控制决策。
+- controller 使用 `sp_start(resolve_controller_decision)` 提交异常路径裁决。该工具承担 `sp_decide` 的角色，因此不新增 public tool。
 - 插件持久化 state，再调用 OpenCode `session.create` / `session.prompt` 后台调度 child session。
 - child session 的执行结果不会直接塞回 controller 当前回合；后续由 `sp_report`、progress、parent notification 或下一次 `sp_status` 反馈。
 
@@ -396,6 +401,31 @@ controller 面对异常时先对齐事实，再选择工具动作：
 | late report | 只作为审计，不覆盖 newer/canceled state | 查看证据但继续以最新 attempt 为准。 |
 
 这些分支的共同目标是把状态闭合到明确 decision point。plugin 不做语义猜测，controller 也不靠记忆继续；二者通过 `sp_status`、`controller_feedback`、`sp_start`、`sp_cancel` 和 `sp_report` 协作恢复。
+
+### 5.8 工具充分性结论
+
+现有五个 public tools 够用，但 `sp_status` 和 `sp_start` 必须承担更明确的裁决协议：
+
+```text
+expected path:
+  node report/fallback + workflow-spec -> exactly one safe next step -> plugin auto-advances
+
+exception path:
+  no safe single next step -> plugin writes waiting_controller_decision
+  controller calls sp_status
+  sp_status returns allowed_controller_decisions
+  controller chooses one decision
+  controller calls sp_start(resolve_controller_decision)
+```
+
+不需要新增 `sp_decide`：
+
+- `sp_status` 已经是只读事实源和 feedback 入口。
+- `sp_start` 已经是 controller 确认后推进 runtime 的写入口。
+- 把裁决放进 `sp_start(resolve_controller_decision)`，可以继续使用 `expected_state_version` 防 stale decision。
+- 保持五个 public tools 可以减少 controller 在异常场景下的工具选择歧义。
+
+如果后续实现发现 `sp_start` 无法表达某个裁决，优先扩展 `ControllerDecision` union，而不是新增工具。
 
 ## 6. Workflow 文档生命周期
 
