@@ -9,7 +9,7 @@
 
 v5 继承 v4 的 public tool surface、controller autonomy、non-blocking dispatch、runtime recovery、`sp_report` result contract、TUI progress 可见性和主会话按需 progress digest。
 
-v5 的核心变化是取消固定 workflow 语义。插件不再内置 `feature/debug/plan-only/review/verify-finish/parallel-investigate` 这类固定流程作为主决策来源。插件只提供 workflow 建议、agent 能力目录、状态机运行时、派发控制、结果归档、恢复和可见性。controller 根据用户原始需求生成本次 workflow spec，插件按该 spec 控制不同 agent 执行。
+v5 的核心变化是取消固定 workflow 语义。插件不再内置 `feature/debug/plan-only/review/verify-finish/parallel-investigate` 这类固定流程作为主决策来源。插件不负责智能规划 workflow；它只提供 agent 能力目录、workflow schema、常用 workflow 示例、结构校验、状态机运行时、派发控制、结果归档、恢复和可见性。controller 根据用户原始需求生成本次 workflow spec，插件按该 spec 控制不同 agent 执行。
 
 一句话目标：
 
@@ -27,7 +27,7 @@ Superpowers Controller 是一个 controller-driven workflow runtime plugin。
 - plugin 负责持久化 workflow spec、创建和恢复 node session、注入 node prompt、收集 `sp_report`、计算可执行下一步、处理超时/未汇报/取消/恢复，并向 controller 返回结构化反馈。
 - node agent 只执行当前 node，完成后调用 `sp_report` 提交结构化结果。
 
-插件可以给 controller 建议 workflow 形态，但不再把建议当成固定流程强制执行。
+插件可以暴露静态能力和常用 workflow 示例，帮助 controller 生成 spec，但最终规划由 controller 完成。插件不能根据用户自然语言替 controller 选择、生成或修改业务 workflow。
 
 v5 的基础循环保持五个 public tool：
 
@@ -45,7 +45,7 @@ sp_status -> sp_prepare -> sp_start -> sp_report -> transition
 
 - 不再把固定 workflow 类型作为主流程来源。
 - 允许 controller 为每次请求动态生成 workflow spec。
-- 插件只做建议和执行控制，不替 controller 决定业务流程。
+- 插件只做能力暴露、schema 校验和执行控制，不替 controller 决定业务流程。
 - 每个 node 必须有 agent、任务说明、预期输出和 `sp_report` 契约。
 - 每个 agent 完成后必须调用 `sp_report`。
 - 如果 agent 没有调用 `sp_report`，插件必须生成一次 fallback summary result，并把它反馈给 controller 决策。
@@ -77,7 +77,7 @@ sp_report
 
 ### 5.1 `sp_status`
 
-`sp_status` 是只读事实查询，并提供插件建议。
+`sp_status` 是只读事实查询，并可返回确定性的能力目录。
 
 返回内容包括：
 
@@ -88,50 +88,42 @@ sp_report
 - 阻塞原因。
 - controller_feedback。
 - 可选 progress_digest。
-- workflow 建议目录。
+- agent catalog、workflow schema 能力和常用 workflow 示例。
 
 `sp_status` 不生成 workflow，不修改 workflow。
 
 ### 5.2 `sp_prepare`
 
-`sp_prepare` 在 v5 中有两种用法。
+`sp_prepare` 在 v5 中只处理 controller 已生成的 workflow spec。它不根据用户请求生成 workflow，也不返回智能规划建议。
 
-#### Suggestion mode
+#### Validation mode
 
-当 controller 还没有生成 workflow spec 时，`sp_prepare` 可以返回建议。
+当 controller 已生成 workflow spec，但还没有决定是否注册时，可以调用 validation mode 做 dry-run 校验。
 
 输入：
 
 ```ts
-type SpPrepareSuggestionInput = {
+type SpPrepareValidationInput = {
+  mode: "validate_workflow"
   request: string
-  constraints?: string[]
-  known_context?: string
-  mode?: "suggestion"
+  workflow_spec: GeneratedWorkflowSpec
 }
 ```
 
 输出：
 
 ```ts
-type WorkflowSuggestion = {
-  suggested_nodes: Array<{
-    role: string
-    recommended_agent: AgentName
-    reason: string
-    expected_output: string
-  }>
-  suggested_edges: Array<{
-    from: string
-    to: string
-    condition: string
-  }>
-  risk_notes: string[]
+type WorkflowValidationResult = {
+  valid: boolean
+  errors: string[]
+  warnings: string[]
   required_user_confirmations: string[]
+  referenced_agents: AgentName[]
+  referenced_documents: string[]
 }
 ```
 
-Suggestion mode 只提供建议，不创建可执行 workflow。
+Validation mode 不创建 workflow、不派发 child session、不写入 draft state。它只返回 schema、agent、edge、document contract、report contract 和确认点校验结果。
 
 #### Workflow registration mode
 
@@ -152,6 +144,7 @@ type SpPrepareWorkflowInput = {
 - 校验 workflow spec 的结构完整性。
 - 校验 node agent 是否存在。
 - 校验每个 node 是否有 report_contract。
+- 校验 document contract 是否能和 node 输入输出对应。
 - 写入 draft state。
 - 返回 `recommended_next: approve_workflow | revise_workflow | cancel_workflow`。
 
@@ -192,11 +185,10 @@ type SpReportInput = {
     prompt: string
     options?: Array<{ label: string; description?: string }>
   }
-  next_suggestion?: string
 }
 ```
 
-`next_suggestion` 是 node agent 的建议，不是 transition 命令。插件只能把它作为结果上下文反馈给 controller 或与 workflow spec condition 一起参考。
+`sp_report` 不能包含 `next_action`、`next_suggestion`、`child_session_id`、`reuse_session_id` 或其它 control-plane 字段。node agent 可以在 `summary` 或 `findings` 中描述观察和风险，但不能指挥插件派发下一步。
 
 ### 5.5 `sp_cancel`
 
@@ -214,6 +206,7 @@ type GeneratedWorkflowSpec = {
   constraints: string[]
   nodes: WorkflowNodeSpec[]
   edges: WorkflowEdgeSpec[]
+  documents?: WorkflowDocumentSpec[]
   completion_policy: CompletionPolicy
   fallback_policy: FallbackPolicy
 }
@@ -224,10 +217,27 @@ type WorkflowNodeSpec = {
   title: string
   task: string
   required_context?: string[]
+  consumes?: string[]
+  produces?: string[]
   expected_output: string
   report_contract: ReportContract
   timeout_policy?: TimeoutPolicy
   no_report_policy?: NoReportPolicy
+}
+
+type WorkflowDocumentSpec = {
+  id: string
+  title: string
+  kind: "runtime_artifact" | "workspace_file"
+  path?: string
+  producer_node_id: string
+  consumer_node_ids?: string[]
+  promotion:
+    | "on_node_passed"
+    | "on_controller_approval"
+    | "on_workflow_finish"
+    | "none"
+  required: boolean
 }
 
 type WorkflowEdgeSpec = {
@@ -245,12 +255,42 @@ type WorkflowEdgeSpec = {
 - `nodes[].id` 必须唯一。
 - 每个 `node.agent` 必须存在于 agent catalog。
 - 每个 node 必须有 `report_contract`。
+- `nodes[].consumes` 和 `nodes[].produces` 只能引用 `documents[].id`。
+- `documents[].producer_node_id` 必须引用存在的 node。
+- `kind="workspace_file"` 的 document 必须声明 `path`。
 - edge 只能引用存在的 node。
 - graph 可以是 DAG；第一版不支持环，retry 通过新 attempt 记录实现。
 - 没有入边的 node 是 initial runnable node。
 - completion policy 必须说明何时 workflow passed、failed、blocked 或需要 controller decision。
 
-## 7. Runtime Decision Model
+## 7. Workflow Document Lifecycle
+
+v5 把“文档”分成两类：
+
+- runtime control documents: 插件为了调度、恢复和审计生成的文件，例如 `workflow-spec.json`、`state.json`、`events.jsonl`、`nodes/<node-id>/task.md`、`nodes/<node-id>/record.json`、`nodes/<node-id>/output.md`、`nodes/<node-id>/fallback-summary.json`。
+- workspace/user documents: node agent 根据项目规则或 workflow spec 写入工作区的文档，例如 `docs/features/*.md`、`docs/bugfix/*.md`、`docs/spec.md`、`docs/plan.md`、`docs/modules/*.md`。
+
+生成时机：
+
+1. controller intake 阶段只在主会话中澄清和展示草案；用户未批准前不需要写入 workspace document。
+2. `sp_prepare(mode="register_workflow")` 写入 runtime control documents，包括 `workflow-spec.json`、`documents.json`、draft state 和事件日志。
+3. `sp_start` 派发 node 前，插件生成 `nodes/<node-id>/task.md`。如果 node 绑定 `task_id`，同时生成 `reports/<task-id>/task.md`。
+4. node agent 执行时，如果 workflow spec 的 `documents` 要求 workspace 文件，它负责创建或修改对应文件，并在 `sp_report.artifacts`、`summary` 或 `findings` 中报告路径和内容摘要。
+5. node agent 调用 `sp_report(status="progress")` 时，产物只能作为 candidate/progress；不触发 promotion，也不解锁下游节点。
+6. node agent 调用 `sp_report(status="passed")` 后，插件按 `documents[].promotion` 决定是否把 runtime artifact 或 workspace file 标记为 canonical。
+7. `promotion="on_controller_approval"` 的文档必须等待 controller 通过 `sp_start` 提交批准动作后才能成为下游可消费文档。
+8. 下游 node 只能消费 `documents[].consumer_node_ids` 明确允许且已经 canonical 的文档；缺失或 stale 的文档会让 transition 返回 controller decision 或 blocked。
+
+常见文档关联：
+
+- feature 或 bugfix 范围文档：由 designer、planner 或专用 documentation node 生成，路径通常在 `docs/features/` 或 `docs/bugfix/`；在项目规则要求“先生成计划文档”时，它必须在 implementation node 之前 canonical。
+- spec 文档：通常由 `sp-designer` 生成；可以先作为 candidate 给用户审查，批准后成为 planner 的输入。
+- plan/task graph 文档：通常由 `sp-planner` 生成；批准后 `task_graph` 进入 runtime，`plan` 文档成为 implementer 和 reviewer 的输入。
+- task packet 文档：由插件在 dispatch 时生成，始终绑定具体 `node_id`，用于审计 child prompt。
+- implementation/report/check 文档：由 `sp_report` 写入 node record 和 task-scoped report；接受、验证、代码审查节点按同一 `task_id` 关联。
+- module/update 文档：如果实现改变模块契约，workflow spec 应包含收尾或文档节点，在 finish 前更新 `docs/modules/`。
+
+## 8. Runtime Decision Model
 
 插件根据三类输入计算下一步：
 
@@ -285,7 +325,7 @@ transition 输出只能是：
 - workflow spec 不完整。
 - 执行下一步会产生用户未确认的高风险外部副作用。
 
-## 8. No-Report Fallback Summary
+## 9. No-Report Fallback Summary
 
 每个 agent 应调用 `sp_report`。如果没有调用，插件不能让 workflow 静默卡住。
 
@@ -331,7 +371,7 @@ type FallbackSummaryResult = {
 
 如果没有足够内容生成摘要，summary 必须明确写出“没有可靠输出”，并建议 controller retry 或 inspect。
 
-## 9. Controller Feedback Contract
+## 10. Controller Feedback Contract
 
 所有 public tool 返回值必须继续包含 controller_feedback。
 
@@ -339,7 +379,7 @@ v5 增加以下 outcome：
 
 ```ts
 type ControllerOutcome =
-  | "workflow_suggestion"
+  | "capability_catalog"
   | "workflow_registered"
   | "node_running"
   | "node_reported"
@@ -358,9 +398,9 @@ type ControllerOutcome =
 - controller 可选动作。
 - 允许调用哪些 public tools。
 
-## 10. Agent Catalog And Suggestions
+## 11. Agent Catalog, Schema, And Workflow Examples
 
-插件维护 agent catalog，但不把 catalog 组合成固定 workflow。
+插件维护 agent catalog、workflow schema 和常用 workflow 示例，但不把这些内容组合成智能建议，也不根据用户请求选择 workflow。
 
 agent catalog 只描述：
 
@@ -371,25 +411,27 @@ agent catalog 只描述：
 - expected report pattern。
 - unsuitable scenarios。
 
-controller 生成 workflow spec 时可以参考 catalog。
+workflow examples 是静态样例，用于总控 prompt 和能力展示。它们不具备强制力，也不是插件的规划结果。
 
-插件给建议时应使用“建议”口吻：
+常用示例包括：
 
-- 推荐 `sp-designer` 处理设计约束。
-- 推荐 `sp-planner` 生成 task graph。
-- 推荐 `sp-implementer` 执行实现。
-- 推荐 reviewer/verifier 做检查。
-- 推荐 `sp-finisher` 做收口。
+- feature with unclear requirements: intake -> design/spec -> approval -> plan/task graph -> implementation tasks -> acceptance -> verification -> code review -> finish。
+- simple scoped implementation: intake -> implementation -> verification -> optional review -> finish。
+- bugfix: intake/reproduce -> root cause investigation -> repair plan or implementation -> regression verification -> review -> finish。
+- design-only or plan-only: design or plan node -> user review -> terminal, without implementation nodes。
+- review-only: acceptance or code review node -> verification when needed -> controller decision or finish。
+- parallel investigation: independent investigator nodes -> synthesis/finish -> controller decision before any write action。
 
-但最终是否采用这些节点由 controller 和用户确认的 workflow spec 决定。
+controller 生成 workflow spec 时可以参考这些示例，但必须按用户目标、项目规则、风险和确认点裁剪。
 
-## 11. Persistence And Audit
+## 12. Persistence And Audit
 
 v5 需要持久化：
 
 ```text
 .opencode/superpowers/runs/<run-id>/
   workflow-spec.json
+  documents.json
   state.json
   events.jsonl
   nodes/<node-id>/task.md
@@ -401,12 +443,13 @@ v5 需要持久化：
 审计要求：
 
 - controller 生成的 workflow spec 必须落盘。
-- plugin suggestion 必须和 registered workflow spec 分开保存。
+- capability catalog 和 workflow examples 是静态能力说明；registered workflow spec 是本次运行的权威计划，两者必须分开。
+- workspace/user documents 必须通过 `documents.json` 记录 document id、path、producer node、consumer nodes、candidate/canonical 状态和 promotion 事件。
 - fallback summary 必须落盘，不能只在 tool response 中出现。
 - sp_report result 和 fallback summary result 必须进入统一 node history。
 - late report 不能覆盖 fallback summary 后的新 attempt，除非 controller 显式选择采用。
 
-## 12. TUI And Progress Requirements
+## 13. TUI And Progress Requirements
 
 TUI surface 不再假设固定 workflow phase。
 
@@ -419,7 +462,7 @@ TUI surface 不再假设固定 workflow phase。
 
 fallback summary 必须在 `sidebar_content` 和 `sp_status` 中明显可见。
 
-## 13. Acceptance Scenarios
+## 14. Acceptance Scenarios
 
 1. controller 生成包含 3 个 node 的 workflow spec，`sp_prepare(mode="register_workflow")` 校验并写入 draft。
 2. 用户批准后，`sp_start(approve_workflow)` 派发第一个 runnable node。
@@ -430,16 +473,17 @@ fallback summary 必须在 `sidebar_content` 和 `sp_status` 中明显可见。
 7. fallback summary result 不会默认触发下一个 high-risk node。
 8. controller 可以选择 retry node、接受 partial result、取消 workflow 或修改 workflow spec。
 9. startup recovery 发现 running node 没有 terminal report 时，插件生成或恢复 fallback summary，并反馈 controller。
-10. TUI 能显示动态 node graph，而不是固定 feature/debug 阶段。
-11. `sp_status(include_progress=true)` 能显示当前 node progress 和 fallback summary。
-12. plugin suggestion 和 controller registered workflow spec 分开落盘。
+10. workflow spec 声明 `docs/features/*.md` 或 `docs/bugfix/*.md` 时，对应文档必须在 implementation node 前由指定 node 产出并 canonical。
+11. TUI 能显示动态 node graph，而不是固定 feature/debug 阶段。
+12. `sp_status(include_progress=true)` 能显示当前 node progress 和 fallback summary。
+13. capability catalog / workflow examples 和 controller registered workflow spec 分开落盘或分开暴露。
 
-## 14. Migration Notes From V4
+## 15. Migration Notes From V4
 
 | V4 concept | V5 replacement |
 |---|---|
 | fixed workflow kind decides dispatch | controller generated workflow spec decides dispatch |
-| `feature/debug/plan-only/...` built-in flows | plugin suggestions and agent catalog |
+| `feature/debug/plan-only/...` built-in flows | controller-generated spec plus static workflow examples and agent catalog |
 | managed design/planning modes as built-in phases | controller may include designer/planner nodes in workflow spec |
 | fixed task-scoped check chain | controller-generated check nodes and edges |
 | plugin semantic workflow definition | plugin generic execution engine |
@@ -447,7 +491,7 @@ fallback summary 必须在 `sidebar_content` 和 `sp_status` 中明显可见。
 
 v5 不移除现有 agents 或 public tools。它改变的是 agents 被选择和排序的方式。
 
-## 15. Open Questions
+## 16. Open Questions
 
 - fallback summary 是否由插件本地摘要器生成，还是派发一个专用 summarizer agent 生成。
 - workflow spec condition 第一版支持哪些 condition kind。
