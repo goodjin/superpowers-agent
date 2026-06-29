@@ -3,6 +3,7 @@ import { buildWorkflowStatusSnapshot } from "../status/workflow-status"
 import type { ProjectStore } from "../state/store"
 import type { WorkflowState } from "../state/types"
 import { buildControllerFeedback } from "../controller/feedback"
+import { buildCapabilities } from "../capabilities/workflows"
 
 const INCOMPLETE_STATUSES = new Set<WorkflowState["status"]>([
   "intake",
@@ -11,6 +12,7 @@ const INCOMPLETE_STATUSES = new Set<WorkflowState["status"]>([
   "awaiting_plan_approval",
   "waiting_user",
   "waiting_user_decision",
+  "waiting_controller_decision",
   "blocked",
   "failed",
   "recovered_unknown",
@@ -27,6 +29,7 @@ export function createStatusTool(store: ProjectStore): ToolDefinition {
       detail: tool.schema.enum(["summary", "task", "sessions", "full"]).optional().describe("Detail level for the status response"),
       include_progress: tool.schema.boolean().optional().describe("Include recent node progress events from progress.jsonl"),
       progress_tail: tool.schema.number().optional().describe("Number of recent progress events per node when include_progress is true"),
+      include_capabilities: tool.schema.boolean().optional().describe("Include v5 agent catalog, workflow schema, built-in workflow templates, and workflow examples."),
     },
     async execute(args) {
       const current = args.workflow_id ? store.readRun(args.workflow_id) : store.readCurrent()
@@ -53,6 +56,7 @@ export function createStatusTool(store: ProjectStore): ToolDefinition {
           progress_digest: snapshot?.progress_digest,
           recommended_next: snapshot?.recommended_next,
           allowed_controller_decisions: snapshot?.allowed_controller_decisions,
+          capabilities: args.include_capabilities ? buildCapabilities() : undefined,
           controller_feedback: current ? buildControllerFeedback(current) : undefined,
           incomplete_workflows: history,
         },

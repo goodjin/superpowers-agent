@@ -6,6 +6,7 @@ import { createSessionOrchestrator } from "../src/session/orchestrator"
 import { buildNodeTaskPrompt } from "../src/session/templates"
 import { createProjectStore } from "../src/state/store"
 import { createReportHandler } from "../src/tools/report-handler"
+import { createWorkflowSpec } from "../src/capabilities/workflows"
 
 function withTimeout<T>(promise: Promise<T>, ms = 50): Promise<T> {
   return new Promise((resolve, reject) => {
@@ -24,6 +25,121 @@ function withTimeout<T>(promise: Promise<T>, ms = 50): Promise<T> {
 }
 
 describe("sp_report dispatch integration", () => {
+  test("workflow expansion waits for controller decision when auto expansion is disabled", async () => {
+    const project = mkdtempSync(join(tmpdir(), "sp-record-expansion-wait-"))
+    try {
+      const store = createProjectStore(project)
+      const state = store.startRun({
+        workflow: "single-agent",
+        entrypoint: "implement",
+        goal: "One bounded task",
+        request: "# Request",
+        proposal: "# Proposal",
+        parentSessionID: "session-main",
+      })
+      store.setWorkflowSpec({
+        runID: state.id,
+        parentSessionID: "session-main",
+        workflowSpec: createWorkflowSpec({
+          id: `${state.id}-workflow-spec`,
+          kind: "orchestration",
+          title: "Bounded single node",
+          autoExpansionAllow: false,
+          orchestration: {
+            nodes: [{ id: "01-implement", agent: "sp-implementer", phase: "implement" }],
+          },
+        }),
+      })
+      const handler = createReportHandler({
+        store,
+        orchestrator: {
+          async dispatch() {
+            throw new Error("should not dispatch while waiting for controller decision")
+          },
+        },
+      })
+
+      const output = await handler({
+        event: "plan",
+        status: "passed",
+        summary: "Planner proposed extra work.",
+        artifacts: { plan: "# Plan" },
+        gates: { plan_written: true },
+        workflow_expansion: {
+          reason: "Need one follow-up task.",
+          tasks: [{ id: "T1", title: "Follow-up", summary: "Do follow-up", depends_on: [] }],
+        },
+      })
+
+      const result = JSON.parse(output)
+      expect(result.state.status).toBe("waiting_controller_decision")
+      expect(result.controller_feedback.allowed_controller_decisions.map((item: { kind: string }) => item.kind)).toContain("apply_workflow_patch")
+      expect(store.readCurrent()?.pending_workflow_expansion?.tasks?.[0].id).toBe("T1")
+    } finally {
+      rmSync(project, { recursive: true, force: true })
+    }
+  })
+
+  test("workflow expansion creates runnable tasks when auto expansion is allowed", async () => {
+    const project = mkdtempSync(join(tmpdir(), "sp-record-expansion-apply-"))
+    try {
+      const store = createProjectStore(project)
+      const state = store.startRun({
+        workflow: "feature",
+        entrypoint: "plan",
+        goal: "Expanded feature",
+        request: "# Request",
+        proposal: "# Proposal",
+        parentSessionID: "session-main",
+      })
+      store.setWorkflowSpec({
+        runID: state.id,
+        parentSessionID: "session-main",
+        workflowSpec: createWorkflowSpec({
+          id: `${state.id}-workflow-spec`,
+          kind: "orchestration",
+          title: "Expandable",
+          autoExpansionAllow: true,
+          orchestration: {
+            nodes: [{ id: "01-plan", agent: "sp-planner", phase: "plan" }],
+          },
+        }),
+      })
+      const dispatched: string[] = []
+      const handler = createReportHandler({
+        store,
+        orchestrator: {
+          async dispatch(args) {
+            dispatched.push(args.decision.task_id ?? args.decision.phase)
+            return {
+              action: args.decision.action,
+              session_id: `session-${args.decision.task_id}`,
+              task_markdown: "# Task",
+            }
+          },
+        },
+      })
+
+      await handler({
+        event: "plan",
+        status: "passed",
+        summary: "Planner expanded tasks.",
+        artifacts: { plan: "# Plan" },
+        gates: { plan_written: true },
+        workflow_expansion: {
+          reason: "Planner produced execution tasks.",
+          tasks: [{ id: "T1", title: "Implement", summary: "Implement", depends_on: [], agent: "sp-implementer" }],
+        },
+      })
+
+      expect(store.readCurrent()?.task_graph?.tasks.map((task) => task.id)).toEqual(["T1"])
+      expect(dispatched).toEqual(["T1"])
+      expect(store.readCurrent()?.node_runs.at(-1)?.agent).toBe("sp-implementer")
+    } finally {
+      rmSync(project, { recursive: true, force: true })
+    }
+  })
+
   test("plan passed with runnable tasks dispatches implementer sessions and records node_runs", async () => {
     const project = mkdtempSync(join(tmpdir(), "sp-record-dispatch-"))
     try {

@@ -160,21 +160,31 @@ function decideFromState(state: WorkflowState): DispatchDecision[] {
 }
 
 function dispatchEntrypoint(state: WorkflowState): DispatchDecision[] {
+  const specDecision = dispatchFromWorkflowSpec(state)
+  if (specDecision.length > 0) return specDecision
+
   if (state.workflow === "feature" && state.entrypoint === "execute") {
     return [create("implement", "sp-implementer", "execute entrypoint confirmed")]
   }
 
   switch (state.workflow) {
+    case "bugfix":
     case "debug":
       return [create("debug", "sp-debugger", "debug workflow confirmed")]
+    case "design-only":
+      return [create("design", "sp-designer", "design-only workflow confirmed")]
     case "plan-only":
       return [create("plan", "sp-planner", "plan workflow confirmed")]
+    case "review-only":
+      return [create("code-review", "sp-code-reviewer", "review-only workflow confirmed")]
     case "review":
       return [create("acceptance", "sp-acceptance-reviewer", "review workflow confirmed")]
     case "verify-finish":
       return [create("verification", "sp-verifier", "verify-finish workflow confirmed")]
     case "parallel-investigate":
       return [create("investigate", "sp-investigator", "parallel investigation confirmed")]
+    case "single-agent":
+      return [create("implement", "sp-implementer", "single-agent workflow confirmed")]
     default:
       return [create("design", "sp-designer", "feature workflow confirmed")]
   }
@@ -185,9 +195,10 @@ function planDispatches(state: WorkflowState, record: SpRecordInput): DispatchDe
   if (!graph) return [{ action: "blocked", reason: "plan passed without task graph" }]
   const normalized = normalizeTaskGraph(graph)
   const { passed, running, failed } = taskRunSetsForWorkflow({ ...state, task_graph: normalized })
-  return getRunnableTasks(normalized, { passed, running, failed }).map((task) =>
-    create("implement", "sp-implementer", `task ${task.id} is runnable`, task.id),
-  )
+  return getRunnableTasks(normalized, { passed, running, failed }).map((task) => {
+    const agent = isNodeAgentName(task.agent) ? task.agent : "sp-implementer"
+    return create(phaseForAgent(agent), agent, `task ${task.id} is runnable`, task.id)
+  })
 }
 
 function failedRecordDispatches(state: WorkflowState, record: SpRecordInput): DispatchDecision[] {
@@ -229,6 +240,39 @@ function create(phase: string, agent: NodeAgentName, reason: string, taskID?: st
     task_id: taskID,
     review_context: reviewContext,
     reason,
+  }
+}
+
+function dispatchFromWorkflowSpec(state: WorkflowState): DispatchDecision[] {
+  const node = state.workflow_spec?.orchestration.nodes[0]
+  if (!node || !isNodeAgentName(node.agent)) return []
+  return [create(node.phase ?? phaseForAgent(node.agent), node.agent, `workflow spec entry node ${node.id}`, node.task_id)]
+}
+
+function isNodeAgentName(agent: string | undefined): agent is NodeAgentName {
+  return agent !== undefined && agent in AGENT_SKILL_MAP
+}
+
+function phaseForAgent(agent: NodeAgentName): string {
+  switch (agent) {
+    case "sp-designer":
+      return "design"
+    case "sp-planner":
+      return "plan"
+    case "sp-debugger":
+      return "debug"
+    case "sp-investigator":
+      return "investigate"
+    case "sp-acceptance-reviewer":
+      return "acceptance"
+    case "sp-code-reviewer":
+      return "code-review"
+    case "sp-verifier":
+      return "verification"
+    case "sp-finisher":
+      return "finish"
+    default:
+      return "implement"
   }
 }
 

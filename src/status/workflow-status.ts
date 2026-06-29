@@ -160,7 +160,7 @@ function attentionSummary(state: WorkflowState, recommended: ReturnType<typeof r
       next_action: recommended.action,
     }
   }
-  if (["blocked", "failed", "waiting_user_decision", "recovered_unknown"].includes(state.status)) {
+  if (["blocked", "failed", "waiting_user_decision", "waiting_controller_decision", "recovered_unknown"].includes(state.status)) {
     return {
       kind: state.status === "failed" ? "failed" : "blocked",
       summary: recommended.reason,
@@ -274,6 +274,12 @@ function recommendedNext(
     return {
       action: "resume_or_cancel_recovered_workflow",
       reason: "Startup recovery found a workflow that was previously running; no live child session is assumed.",
+    }
+  }
+  if (state.status === "waiting_controller_decision") {
+    return {
+      action: "resolve_controller_decision",
+      reason: "Workflow is waiting for the controller to apply or reject a runtime decision.",
     }
   }
   const stalled = sessions.find((session) => session.durable_status === "running" && session.activity_status === "stalled")

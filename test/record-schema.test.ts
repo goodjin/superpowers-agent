@@ -71,6 +71,27 @@ describe("parseSpRecordInput", () => {
     expect(record.task_graph?.tasks[2]?.depends_on).toEqual(["task-a"])
   })
 
+  test("accepts v5 workflow expansion patches", () => {
+    const record = parseSpRecordInput({
+      event: "plan",
+      status: "passed",
+      summary: "Plan completed.",
+      artifacts: { plan: "# Plan" },
+      workflow_expansion: {
+        reason: "Planner generated a follow-up task.",
+        tasks: [
+          { id: "task-a", title: "A", summary: "Implement A", depends_on: [], agent: "sp-implementer" },
+        ],
+        nodes: [
+          { id: "01-implement", agent: "sp-implementer", phase: "implement", task_id: "task-a" },
+        ],
+      },
+    })
+
+    expect(record.workflow_expansion?.tasks?.[0].agent).toBe("sp-implementer")
+    expect(record.workflow_expansion?.nodes?.[0].phase).toBe("implement")
+  })
+
   test("rejects model-supplied control-plane fields", () => {
     expect(() =>
       parseSpRecordInput({

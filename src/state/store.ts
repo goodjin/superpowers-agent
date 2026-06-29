@@ -10,9 +10,11 @@ import type {
   ResumeInput,
   WorkflowArtifact,
   WorkflowEntrypoint,
+  WorkflowExpansionPatch,
   WorkflowKind,
   WorkflowMode,
   WorkflowRecord,
+  WorkflowSpec,
   WorkflowState,
 } from "./types"
 
@@ -74,6 +76,13 @@ export type ProjectStore = {
     parentSessionID?: string
     decision: ControllerDecision
   }): WorkflowState
+  setWorkflowSpec(args: {
+    runID: string
+    parentSessionID?: string
+    workflowSpec: WorkflowSpec
+    workflow?: WorkflowKind
+    entrypoint?: WorkflowEntrypoint
+  }): WorkflowState
   record(record: WorkflowRecord): WorkflowState
   recordNodeResult(args: { nodeID?: string; sessionID?: string; agent?: string; input: WorkflowRecord }): WorkflowState
   cancel(args: { runID?: string; taskID?: string; sessionID?: string; reason?: string }): WorkflowState
@@ -119,10 +128,11 @@ export function createProjectStore(project: string, options: ProjectStoreOptions
         const reconciled = reconcileStartupState(current, {
           reason: "Store loaded persisted state; previous running workflow state cannot be assumed live after startup.",
         })
-        if (reconciled.changed) {
-          runtimeRuns.set(reconciled.state.id, reconciled.state)
-          writeState(root, reconciled.state)
-          appendStartupRecoveryEvidence(root, reconciled.state, reconciled, reconciled.reason)
+      if (reconciled.changed) {
+          const withFallback = addStartupFallbackSummaries(root, reconciled.state, reconciled, reconciled.reason)
+          runtimeRuns.set(withFallback.id, withFallback)
+          writeState(root, withFallback)
+          appendStartupRecoveryEvidence(root, withFallback, reconciled, reconciled.reason)
         }
       }
     }
@@ -169,6 +179,7 @@ export function createProjectStore(project: string, options: ProjectStoreOptions
       })
       persistCurrent(state)
       writeRunMarkdown(root, state.id, "request.md", `# Request\n\n${args.goal.trim()}\n`)
+      writeDocumentsManifest(root, state)
       appendChangelog(root, state.id, `created ${args.mode} workflow`)
       return state
     },
@@ -187,6 +198,7 @@ export function createProjectStore(project: string, options: ProjectStoreOptions
       writeRunMarkdown(root, state.id, "request.md", args.request)
       writeRunMarkdown(root, state.id, "task.md", args.request)
       writeRunMarkdown(root, state.id, "proposal.md", args.proposal)
+      writeDocumentsManifest(root, state)
       appendEvent(root, state.id, { type: "workflow_started", workflow: state.workflow, entrypoint: state.entrypoint })
       appendChangelog(root, state.id, `created ${args.workflow} workflow from ${args.entrypoint}`)
       return state
@@ -216,6 +228,7 @@ export function createProjectStore(project: string, options: ProjectStoreOptions
       writeRunMarkdown(root, state.id, "request.md", args.request)
       writeRunMarkdown(root, state.id, "task.md", args.request)
       writeRunMarkdown(root, state.id, "proposal.md", args.proposal)
+      writeDocumentsManifest(root, state)
       appendEvent(root, state.id, { type: "workflow_prepared", workflow: state.workflow, entrypoint: state.entrypoint })
       appendChangelog(root, state.id, `prepared ${args.workflow} workflow from ${args.entrypoint}`)
       return state
@@ -349,9 +362,10 @@ export function createProjectStore(project: string, options: ProjectStoreOptions
       if (!current) return null
       const reconciled = reconcileStartupState(current, args)
       if (!reconciled.changed) return current
-      persistCurrent(reconciled.state)
-      appendStartupRecoveryEvidence(root, reconciled.state, reconciled, args.reason)
-      return reconciled.state
+      const withFallback = addStartupFallbackSummaries(root, reconciled.state, reconciled, args.reason)
+      persistCurrent(withFallback)
+      appendStartupRecoveryEvidence(root, withFallback, reconciled, args.reason)
+      return withFallback
     },
     consumePendingQuestion(args) {
       const current = this.readRun(args.runID)
@@ -416,6 +430,59 @@ export function createProjectStore(project: string, options: ProjectStoreOptions
       if (!current) {
         throw new Error(`No Superpowers workflow found for run ${args.runID}.`)
       }
+      if (args.decision.kind === "apply_workflow_patch" && (args.decision.workflow_patch || current.pending_workflow_expansion)) {
+        const base: WorkflowState = {
+          ...current,
+          session: args.parentSessionID ?? current.session,
+          parent_session_id: args.parentSessionID ?? current.parent_session_id,
+          status: "running",
+        }
+        const patched = applyWorkflowExpansionToState(root, base, args.decision.workflow_patch ?? current.pending_workflow_expansion as WorkflowExpansionPatch)
+        persistCurrent(patched)
+        appendEvent(root, patched.id, {
+          type: "controller_decision_apply_workflow_patch",
+          decision: args.decision,
+          state_version: patched.state_version,
+        })
+        appendChangelog(root, patched.id, `controller applied workflow patch: ${args.decision.reason ?? "no reason provided"}`)
+        return patched
+      }
+      if (args.decision.kind === "replace_orchestration" && args.decision.orchestration && current.workflow_spec) {
+        const now = new Date().toISOString()
+        const next: WorkflowState = {
+          ...current,
+          session: args.parentSessionID ?? current.session,
+          parent_session_id: args.parentSessionID ?? current.parent_session_id,
+          status: "running",
+          phase: "workflow-orchestration-replaced",
+          current_phase: "workflow-orchestration-replaced",
+          workflow_spec: {
+            ...current.workflow_spec,
+            updated_at: now,
+            orchestration: args.decision.orchestration,
+          },
+          updated_at: now,
+          state_version: nextStateVersion(),
+          history: [
+            ...current.history,
+            {
+              at: now,
+              event: "controller_decision_replace_orchestration",
+              from: current.phase,
+              to: "workflow-orchestration-replaced",
+              summary: args.decision.reason ?? "Controller replaced workflow orchestration.",
+            },
+          ],
+        }
+        persistCurrent(next)
+        appendEvent(root, next.id, {
+          type: "controller_decision_replace_orchestration",
+          decision: args.decision,
+          state_version: next.state_version,
+        })
+        appendChangelog(root, next.id, `controller replaced orchestration: ${args.decision.reason ?? "no reason provided"}`)
+        return next
+      }
       const now = new Date().toISOString()
       const status = statusForControllerDecision(current, args.decision)
       const phase = phaseForControllerDecision(current, args.decision)
@@ -451,6 +518,32 @@ export function createProjectStore(project: string, options: ProjectStoreOptions
         state_version: next.state_version,
       })
       appendChangelog(root, next.id, `controller decision ${args.decision.kind}: ${summary}`)
+      return next
+    },
+    setWorkflowSpec(args) {
+      const current = this.readRun(args.runID)
+      if (!current) {
+        throw new Error(`No Superpowers workflow found for run ${args.runID}.`)
+      }
+      const next: WorkflowState = {
+        ...current,
+        session: args.parentSessionID ?? current.session,
+        parent_session_id: args.parentSessionID ?? current.parent_session_id,
+        workflow: args.workflow ?? current.workflow,
+        entrypoint: args.entrypoint ?? current.entrypoint,
+        workflow_spec: args.workflowSpec,
+        updated_at: new Date().toISOString(),
+        state_version: nextStateVersion(),
+      }
+      writeJson(root, next.id, "workflow-spec.json", args.workflowSpec)
+      persistCurrent(next)
+      appendEvent(root, next.id, {
+        type: "workflow_spec_set",
+        workflow_spec_id: args.workflowSpec.id,
+        template_id: args.workflowSpec.template_id,
+        auto_expansion: args.workflowSpec.auto_expansion,
+      })
+      appendChangelog(root, next.id, `set workflow spec ${args.workflowSpec.id}`)
       return next
     },
     record(record) {
@@ -514,7 +607,10 @@ export function createProjectStore(project: string, options: ProjectStoreOptions
         node_runs: nodeRuns,
         pending_question: pendingQuestion,
       }
-      persistCurrent(withNodes)
+      const withExpansion = args.input.workflow_expansion
+        ? applyWorkflowExpansionToState(root, withNodes, args.input.workflow_expansion)
+        : withNodes
+      persistCurrent(withExpansion)
       appendEvent(root, withNodes.id, {
         type: "report_received",
         node_id: nodeID,
@@ -522,8 +618,8 @@ export function createProjectStore(project: string, options: ProjectStoreOptions
         status: args.input.status,
         summary: args.input.summary,
       })
-      appendChangelog(root, withNodes.id, `${args.input.event}: ${args.input.status} - ${args.input.summary}`)
-      return withNodes
+      appendChangelog(root, withExpansion.id, `${args.input.event}: ${args.input.status} - ${args.input.summary}`)
+      return withExpansion
     },
     cancel(args) {
       const current = args.runID ? this.readRun(args.runID) : this.readCurrent()
@@ -762,6 +858,141 @@ function appendStartupRecoveryEvidence(
   appendChangelog(root, state.id, `startup recovered workflow running status: ${reason}`)
 }
 
+function addStartupFallbackSummaries(
+  root: string,
+  state: WorkflowState,
+  reconciliation: StartupReconciliation,
+  reason: string,
+): WorkflowState {
+  if (reconciliation.interruptedIDs.length === 0) return state
+  const now = new Date().toISOString()
+  const existing = new Set(state.fallback_summaries?.map((item) => item.node_id) ?? [])
+  const summaries = [...(state.fallback_summaries ?? [])]
+  for (const nodeID of reconciliation.interruptedIDs) {
+    if (existing.has(nodeID)) continue
+    const node = state.node_runs.find((item) => item.id === nodeID)
+    const path = `nodes/${nodeID}/fallback-summary.json`
+    const body = {
+      node_id: nodeID,
+      session_id: node?.session_id,
+      task_id: node?.task_id,
+      phase: node?.phase,
+      agent: node?.agent,
+      status: "interrupted",
+      reason,
+      created_at: now,
+      confidence: "partial",
+      summary: "This node was running before startup recovery. No terminal sp_report was recorded, so controller must retry, inspect, accept partial evidence, reprepare, or cancel.",
+    }
+    const fullPath = join(root, "runs", state.id, path)
+    mkdirSync(dirname(fullPath), { recursive: true })
+    writeFileSync(fullPath, `${JSON.stringify(body, null, 2)}\n`)
+    summaries.push({ node_id: nodeID, path, reason, created_at: now })
+  }
+  return {
+    ...state,
+    fallback_summaries: summaries,
+  }
+}
+
+function applyWorkflowExpansionToState(
+  root: string,
+  state: WorkflowState,
+  expansion: WorkflowExpansionPatch,
+): WorkflowState {
+  const now = new Date().toISOString()
+  const allowed = state.workflow_spec?.auto_expansion.allow ?? !state.workflow.endsWith("-only")
+  writeJson(root, state.id, "workflow-expansion-latest.json", expansion)
+  if (!allowed) {
+    return {
+      ...state,
+      status: "waiting_controller_decision",
+      pending_workflow_expansion: expansion,
+      next: "Controller must decide whether to apply workflow_expansion, replace orchestration, retry, or mark blocked.",
+      updated_at: now,
+      state_version: nextStateVersion(),
+      history: [
+        ...state.history,
+        {
+          at: now,
+          event: "workflow_expansion_waiting_controller",
+          from: state.phase,
+          to: state.phase,
+          summary: expansion.reason ?? "Node reported workflow expansion while auto expansion is disabled.",
+        },
+      ],
+    }
+  }
+
+  const existingTasks = state.task_graph?.tasks ?? []
+  const nextTasks = expansion.tasks?.length
+    ? expansion.mode === "replace"
+      ? expansion.tasks
+      : mergeTasks(existingTasks, expansion.tasks)
+    : existingTasks
+  const nextWorkflowSpec = state.workflow_spec && expansion.nodes?.length
+    ? {
+        ...state.workflow_spec,
+        updated_at: now,
+        orchestration: {
+          ...state.workflow_spec.orchestration,
+          nodes: expansion.mode === "replace"
+            ? expansion.nodes
+            : mergeNodes(state.workflow_spec.orchestration.nodes, expansion.nodes),
+          documents: expansion.documents?.length
+            ? [
+                ...(state.workflow_spec.orchestration.documents ?? []),
+                ...expansion.documents,
+              ]
+            : state.workflow_spec.orchestration.documents,
+        },
+      }
+    : state.workflow_spec
+  const next: WorkflowState = {
+    ...state,
+    pending_workflow_expansion: undefined,
+    task_graph: nextTasks.length ? normalizeTaskGraph({ tasks: nextTasks }) : state.task_graph,
+    workflow_spec: nextWorkflowSpec,
+    documents: expansion.documents?.length ? [...(state.documents ?? []), ...expansion.documents] : state.documents,
+    updated_at: now,
+    state_version: nextStateVersion(),
+    history: [
+      ...state.history,
+      {
+        at: now,
+        event: "workflow_expansion_applied",
+        from: state.phase,
+        to: state.phase,
+        summary: expansion.reason ?? "Applied node-reported workflow expansion.",
+      },
+    ],
+  }
+  if (next.task_graph) {
+    writeJson(root, next.id, "task_graph.json", next.task_graph)
+    writeJson(root, next.id, "tasks.json", next.task_graph)
+  }
+  if (next.workflow_spec) writeJson(root, next.id, "workflow-spec.json", next.workflow_spec)
+  appendEvent(root, next.id, {
+    type: "workflow_expansion_applied",
+    reason: expansion.reason,
+    task_count: expansion.tasks?.length ?? 0,
+    node_count: expansion.nodes?.length ?? 0,
+  })
+  return next
+}
+
+function mergeTasks(existing: NonNullable<WorkflowState["task_graph"]>["tasks"], incoming: NonNullable<WorkflowState["task_graph"]>["tasks"]) {
+  const byID = new Map(existing.map((task) => [task.id, task]))
+  for (const task of incoming) byID.set(task.id, task)
+  return [...byID.values()]
+}
+
+function mergeNodes(existing: NonNullable<WorkflowState["workflow_spec"]>["orchestration"]["nodes"], incoming: NonNullable<WorkflowState["workflow_spec"]>["orchestration"]["nodes"]) {
+  const byID = new Map(existing.map((node) => [node.id, node]))
+  for (const node of incoming) byID.set(node.id, node)
+  return [...byID.values()]
+}
+
 function resumableStatus(status: WorkflowState["status"]): WorkflowState["status"] {
   if (status === "passed" || status === "canceled") return status
   return "running"
@@ -774,6 +1005,8 @@ function statusForControllerDecision(
   switch (decision.kind) {
     case "continue_existing_graph":
     case "retry_node":
+    case "apply_workflow_patch":
+    case "replace_orchestration":
       return resumableStatus(current.status)
     case "accept_partial_result":
       return "passed"
@@ -789,6 +1022,10 @@ function phaseForControllerDecision(current: WorkflowState, decision: Controller
       return current.phase
     case "retry_node":
       return "retrying-node"
+    case "apply_workflow_patch":
+      return "workflow-patch-applied"
+    case "replace_orchestration":
+      return "workflow-orchestration-replaced"
     case "accept_partial_result":
       return "partial-result-accepted"
     case "mark_blocked":
@@ -802,6 +1039,8 @@ function nextForControllerDecision(decision: ControllerDecision): string | undef
   if (decision.kind === "request_reprepare") return "Call sp_prepare with a revised task brief."
   if (decision.kind === "mark_blocked") return decision.required_user_action
   if (decision.kind === "accept_partial_result") return "Report the accepted partial result to the user."
+  if (decision.kind === "apply_workflow_patch") return "Continue with the patched workflow graph."
+  if (decision.kind === "replace_orchestration") return "Continue with the replacement orchestration."
   return undefined
 }
 
@@ -861,17 +1100,24 @@ function modeForWorkflow(workflow: WorkflowKind, entrypoint?: WorkflowEntrypoint
   if (entrypoint === "debug") return "debug"
   if (entrypoint === "review") return "review"
   if (entrypoint === "verify") return "verify-finish"
+  if (entrypoint === "investigate") return "parallel-investigate"
   switch (workflow) {
+    case "bugfix":
     case "debug":
       return "debug"
+    case "design-only":
+      return "design"
     case "plan-only":
       return "plan"
+    case "review-only":
     case "review":
       return "review"
     case "verify-finish":
       return "verify-finish"
     case "parallel-investigate":
       return "parallel-investigate"
+    case "single-agent":
+      return "execute"
     default:
       return "design"
   }
@@ -884,6 +1130,89 @@ function writeState(root: string, state: WorkflowState): void {
   writeFileSync(join(root, "runs", state.id, "workflow.json"), `${JSON.stringify(state, null, 2)}\n`)
   writeJson(root, state.id, "sessions.json", { sessions: state.node_runs })
   if (state.task_graph) writeJson(root, state.id, "tasks.json", state.task_graph)
+  if (state.workflow_spec) writeJson(root, state.id, "workflow-spec.json", state.workflow_spec)
+  writeDocumentsManifest(root, state)
+}
+
+function writeDocumentsManifest(root: string, state: WorkflowState): void {
+  writeJson(root, state.id, "documents.json", buildDocumentsManifest(root, state))
+}
+
+function buildDocumentsManifest(root: string, state: WorkflowState) {
+  const now = new Date().toISOString()
+  const runRoot = join(root, "runs", state.id)
+  const docs = new Map<string, {
+    id: string
+    path: string
+    kind: string
+    producer: string
+    consumer?: string[]
+    status?: string
+    node_id?: string
+    task_id?: string
+    updated_at: string
+  }>()
+  const add = (item: {
+    id: string
+    path: string
+    kind: string
+    producer: string
+    consumer?: string[]
+    status?: string
+    node_id?: string
+    task_id?: string
+  }) => {
+    if (!existsSync(join(runRoot, item.path))) return
+    docs.set(item.id, { ...item, updated_at: now })
+  }
+  add({ id: "request", path: "request.md", kind: "request", producer: "controller", consumer: ["controller", "node"], status: "current" })
+  add({ id: "task", path: "task.md", kind: "task", producer: "plugin", consumer: ["controller", "node"], status: "current" })
+  add({ id: "proposal", path: "proposal.md", kind: "proposal", producer: "plugin", consumer: ["controller"], status: state.activation === "draft" ? "draft" : "approved" })
+  add({ id: "workflow_spec", path: "workflow-spec.json", kind: "workflow_spec", producer: "plugin", consumer: ["controller", "node"], status: "current" })
+  add({ id: "spec", path: "spec.md", kind: "spec", producer: "node", consumer: ["planner", "implementer"], status: state.gates.spec_written ? "approved" : "candidate" })
+  add({ id: "plan", path: "plan.md", kind: "plan", producer: "node", consumer: ["implementer", "reviewer", "verifier"], status: state.gates.plan_written ? "approved" : "candidate" })
+  add({ id: "task_graph", path: "task_graph.json", kind: "task_graph", producer: "node", consumer: ["plugin", "controller"], status: "current" })
+  add({ id: "tasks", path: "tasks.json", kind: "task_graph", producer: "plugin", consumer: ["plugin", "controller"], status: "current" })
+  for (const node of state.node_runs) {
+    add({
+      id: `node_${node.id}_task`,
+      path: `nodes/${node.id}/task.md`,
+      kind: "node_task",
+      producer: "plugin",
+      consumer: [node.agent],
+      status: node.status === "running" ? "current" : "historical",
+      node_id: node.id,
+      task_id: node.task_id,
+    })
+    add({
+      id: `node_${node.id}_record`,
+      path: `nodes/${node.id}/record.json`,
+      kind: "node_record",
+      producer: "node",
+      consumer: ["plugin", "controller"],
+      status: node.status === "running" ? "current" : "historical",
+      node_id: node.id,
+      task_id: node.task_id,
+    })
+    add({
+      id: `node_${node.id}_fallback`,
+      path: `nodes/${node.id}/fallback-summary.json`,
+      kind: "fallback_summary",
+      producer: "recovery",
+      consumer: ["controller"],
+      status: "candidate",
+      node_id: node.id,
+      task_id: node.task_id,
+    })
+  }
+  for (const item of state.documents ?? []) {
+    docs.set(item.id, { ...item, producer: item.producer, updated_at: item.updated_at ?? now })
+  }
+  return {
+    run_id: state.id,
+    updated_at: now,
+    documents: [...docs.values()].sort((a, b) => a.path.localeCompare(b.path)),
+  }
 }
 
 function writeRunMarkdown(root: string, run: string, filename: string, body: string): void {

@@ -84,7 +84,7 @@ export function buildRecommendedNext(state: WorkflowState): RecommendedNext[] {
   }
   if (state.status === "passed") return [{ action: "finish", run_id: state.id }]
   if (state.status === "canceled") return [{ action: "blocked", reason: "workflow is canceled" }]
-  if (state.status === "blocked" || state.status === "failed" || state.status === "waiting_user_decision" || state.status === "recovered_unknown") {
+  if (state.status === "blocked" || state.status === "failed" || state.status === "waiting_user_decision" || state.status === "waiting_controller_decision" || state.status === "recovered_unknown") {
     return [{ action: "blocked", reason: `workflow is ${state.status}` }]
   }
   return [{ action: "blocked", reason: "no runnable node or approval decision is available" }]
@@ -118,6 +118,19 @@ export function buildAllowedControllerDecisions(state: WorkflowState): AllowedCo
       reason: "Continue by recalculating runnable nodes from the current graph.",
     }, {
       reason: "Ask runtime to continue from current structured state without changing scope.",
+      risk: "medium",
+      tool: "sp_start",
+      requiresUserConfirmation: true,
+    }))
+  }
+
+  if (state.status === "waiting_controller_decision" && state.pending_workflow_expansion) {
+    decisions.push(decisionOption(state, {
+      kind: "apply_workflow_patch",
+      workflow_patch: state.pending_workflow_expansion,
+      reason: state.pending_workflow_expansion.reason ?? "Apply pending workflow expansion after controller review.",
+    }, {
+      reason: "Apply the pending node-reported workflow expansion.",
       risk: "medium",
       tool: "sp_start",
       requiresUserConfirmation: true,
@@ -169,7 +182,7 @@ export function buildControllerFeedback(state: WorkflowState, override?: Partial
   const needsApproval = state.status === "awaiting_design_approval" || state.status === "awaiting_plan_approval"
   const waitingUser = state.status === "waiting_user"
   const terminal = state.status === "passed" || state.status === "failed" || state.status === "canceled"
-  const blocked = state.status === "blocked" || state.status === "waiting_user_decision" || state.status === "recovered_unknown"
+  const blocked = state.status === "blocked" || state.status === "waiting_user_decision" || state.status === "waiting_controller_decision" || state.status === "recovered_unknown"
   return {
     outcome: override?.outcome ?? (
       terminal ? "terminal" :
@@ -226,13 +239,14 @@ function userRequirementForState(state: WorkflowState): ControllerFeedback["requ
   if (state.status === "awaiting_design_approval") return { reason: "Candidate design requires approval or revision." }
   if (state.status === "awaiting_plan_approval") return { reason: "Candidate plan requires approval or revision." }
   if (state.status === "waiting_user_decision") return { reason: "Controller needs a retry, cancel, approve, or revise decision." }
+  if (state.status === "waiting_controller_decision") return { reason: "Controller needs to apply, replace, retry, block, reprepare, or cancel." }
   return undefined
 }
 
 function approvalTargetForState(state: WorkflowState): ControllerFeedback["approval_target"] {
   if (state.status === "awaiting_design_approval") return "design"
   if (state.status === "awaiting_plan_approval") return "plan"
-  if (state.status === "recovered_unknown" || state.status === "waiting_user_decision") return "retry"
+  if (state.status === "recovered_unknown" || state.status === "waiting_user_decision" || state.status === "waiting_controller_decision") return "retry"
   return undefined
 }
 

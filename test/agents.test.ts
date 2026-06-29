@@ -59,6 +59,18 @@ describe("createAgentConfig", () => {
       expect(String(controller?.prompt ?? "")).toContain("Do not load business or development skills")
   })
 
+  test("controller prompt requires the v5 first-response greeting and workflow protocol", () => {
+    const controller = createAgentConfig()["super-agent"]
+    const prompt = String(controller?.prompt ?? "")
+
+    expect(prompt).toContain("欢迎使用superpowers主控插件，我将按superpowers工作流程完成您的任务。")
+    expect(prompt).toContain("every new super-agent session")
+    expect(prompt).toContain("sp_status(include_capabilities=true)")
+    expect(prompt).toContain("action=start_prepared_task")
+    expect(prompt).toContain("design-only/plan-only/review-only")
+    expect(prompt).toContain("waiting_controller_decision")
+  })
+
   test("inherits global allow permissions for controller and node agents", () => {
     const agents = createAgentConfig({ globalPermission: "allow" })
 

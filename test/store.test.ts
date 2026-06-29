@@ -76,6 +76,8 @@ describe("ProjectStore", () => {
       })
       expect(eventsAfterRecovery).toContain("startup_recovered_interrupted_nodes")
       expect(readFileSync(join(runRoot, "changelog.md"), "utf8")).toContain("startup recovered interrupted nodes")
+      expect(readFileSync(join(runRoot, "nodes", node.id, "fallback-summary.json"), "utf8")).toContain("No terminal sp_report was recorded")
+      expect(readFileSync(join(runRoot, "documents.json"), "utf8")).toContain("fallback_summary")
 
       const second = store.recoverInterruptedRunningNodes({
         reason: "Plugin process started again.",

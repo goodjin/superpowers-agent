@@ -1,12 +1,16 @@
 export type WorkflowKind =
   | "feature"
+  | "bugfix"
   | "debug"
+  | "design-only"
   | "plan-only"
   | "review"
+  | "review-only"
   | "verify-finish"
   | "parallel-investigate"
+  | "single-agent"
 
-export type WorkflowEntrypoint = WorkflowKind | "design" | "plan" | "execute" | "debug" | "review" | "verify"
+export type WorkflowEntrypoint = WorkflowKind | "design" | "plan" | "execute" | "debug" | "review" | "verify" | "investigate" | "implement"
 
 export type WorkflowMode =
   | "idle"
@@ -62,6 +66,7 @@ export type NodeStatus = "progress" | "passed" | "failed" | "blocked" | "needs_u
 export type PrepareMode = "proposal_only" | "managed_design" | "managed_planning"
 
 export type StartAction =
+  | "start_prepared_task"
   | "start_entrypoint"
   | "approve_design"
   | "approve_plan"
@@ -75,6 +80,8 @@ export type ControllerDecisionKind =
   | "accept_partial_result"
   | "mark_blocked"
   | "request_reprepare"
+  | "apply_workflow_patch"
+  | "replace_orchestration"
 
 export type ControllerDecision = {
   kind: ControllerDecisionKind
@@ -84,6 +91,8 @@ export type ControllerDecision = {
   evidence_refs?: string[]
   required_user_action?: string
   reuse_session?: boolean
+  workflow_patch?: WorkflowExpansionPatch
+  orchestration?: WorkflowOrchestration
 }
 
 export type CheckKind = "acceptance" | "verification" | "code_review"
@@ -102,10 +111,73 @@ export type TaskGraph = {
     title: string
     summary: string
     depends_on: string[]
+    agent?: string
     files?: string[]
     test_commands?: string[]
     checks?: CheckState[]
   }>
+}
+
+export type WorkflowDocumentSpec = {
+  id: string
+  path: string
+  kind: string
+  producer: "controller" | "plugin" | "node" | "recovery"
+  consumer?: string[]
+  status?: "draft" | "candidate" | "approved" | "current" | "historical"
+  node_id?: string
+  task_id?: string
+  updated_at?: string
+}
+
+export type WorkflowNodeSpec = {
+  id: string
+  title?: string
+  agent: string
+  phase?: string
+  task_id?: string
+  depends_on?: string[]
+  input_documents?: string[]
+  output_documents?: string[]
+  report_contract?: string[]
+}
+
+export type WorkflowOrchestration = {
+  id?: string
+  title?: string
+  nodes: WorkflowNodeSpec[]
+  edges?: Array<{
+    from: string
+    to: string
+    condition?: string
+  }>
+  documents?: WorkflowDocumentSpec[]
+  completion_policy?: string
+}
+
+export type WorkflowAutoExpansionPolicy = {
+  allow: boolean
+  source?: "template" | "controller_override" | "orchestration"
+  reason?: string
+}
+
+export type WorkflowSpec = {
+  id: string
+  template_id?: WorkflowKind
+  kind: "built_in_workflow" | "orchestration"
+  title: string
+  auto_expansion: WorkflowAutoExpansionPolicy
+  orchestration: WorkflowOrchestration
+  created_at: string
+  updated_at: string
+}
+
+export type WorkflowExpansionPatch = {
+  mode?: "append" | "replace"
+  reason?: string
+  tasks?: TaskGraph["tasks"]
+  nodes?: WorkflowNodeSpec[]
+  documents?: WorkflowDocumentSpec[]
 }
 
 export type NodeRunStatus =
@@ -153,6 +225,7 @@ export type SpRecordInput = {
     options?: QuestionOption[]
   }
   task_graph?: TaskGraph
+  workflow_expansion?: WorkflowExpansionPatch
 }
 
 export type ResumeInput = {
@@ -183,6 +256,7 @@ export type WorkflowState = {
     | "awaiting_plan_approval"
     | "waiting_user"
     | "waiting_user_decision"
+    | "waiting_controller_decision"
     | "blocked"
     | "passed"
     | "failed"
@@ -195,6 +269,15 @@ export type WorkflowState = {
   gates: Partial<Record<WorkflowGate, boolean>>
   artifacts: Partial<Record<WorkflowArtifact, string>>
   task_graph?: TaskGraph
+  workflow_spec?: WorkflowSpec
+  pending_workflow_expansion?: WorkflowExpansionPatch
+  documents?: WorkflowDocumentSpec[]
+  fallback_summaries?: Array<{
+    node_id: string
+    path: string
+    reason: string
+    created_at: string
+  }>
   node_runs: NodeRun[]
   pending_question?: (SpRecordInput["question"] & { source_node_id?: string }) | undefined
   history: Array<{

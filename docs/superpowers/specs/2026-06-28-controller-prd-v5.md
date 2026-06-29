@@ -4,11 +4,13 @@
 
 - Version: v5
 - Date: 2026-06-29
-- Status: refined PRD draft
+- Status: implementation baseline
 - Supersedes: `docs/superpowers/specs/2026-06-27-controller-prd-v4.md`
 - Companion design: `docs/superpowers/specs/2026-06-29-controller-philosophy-tool-interaction-design.md`
 
 v5 继承 v4 已确认的边界：public tool surface、controller autonomy、non-blocking dispatch、runtime recovery、`sp_report` result contract、TUI progress 可见性和主会话按需 progress digest。
+
+本版本是本轮实现基准。运行时代码、模块文档和测试应按本文约束对齐；如果实现为了兼容 v4 保留旧参数或旧状态名称，必须保证 v5 参数优先，并在工具返回值里暴露足够的 controller feedback。
 
 v5 的变化集中在一点：插件不再把内置 workflow kind 当作主决策来源，也不把“是否生成 workflow”作为核心分叉。controller 使用固定工具协议推进任务：先理解需求，再对每个任务调用 `sp_prepare` 准备执行任务、生成既有 run-local artifacts 和用户确认内容；如果需要 `sp-designer` 参与，designer 也在 prepare 阶段作为头脑风暴/设计协作者运行。用户确认后，controller 调用 `sp_start`，用参数指定内置 workflow 代号、自定义 workflow 编排或单节点编排。
 
@@ -129,7 +131,7 @@ node agent 是 child session 中执行单个 node 的 agent。
 
 controller 应遵守：
 
-- 首次收到用户请求时，先输出一句固定欢迎语：`欢迎使用superpowers主控插件，我将按superpowers工作流程完成您的任务。`
+- 每个新的 `super-agent` 会话第一轮 assistant 回复必须先输出一句固定欢迎语：`欢迎使用superpowers主控插件，我将按superpowers工作流程完成您的任务。`
 - 用户和项目指令优先。
 - 先理解用户侧问题，再进入 prepare。
 - 每个执行任务都必须先调用 `sp_prepare`；prepare 用于准备执行任务、生成既有任务 artifacts 和给用户最终确认。
@@ -227,7 +229,7 @@ controller 应先判断任务形态：
 
 controller 的行为规则按任务生命周期分层：
 
-1. First-response rule: 首次收到用户请求时，先输出固定欢迎语，然后进入 intake。欢迎语只在本轮任务首次进入 Superpowers controller 时输出一次，恢复、重试和状态查询不重复输出。
+1. First-response rule: 每个新的 `super-agent` 会话第一轮 assistant 回复必须先输出固定欢迎语，然后进入 intake 或 status 对齐。恢复、重试和状态查询如果发生在新的 `super-agent` 会话第一轮，也必须输出；同一个会话后续轮次不重复输出。
 2. Intake rule: 先在主会话问清用户侧问题，包括目标、范围、约束、验收标准、已有上下文、是否允许改代码、是否只做设计/计划/审查。用户侧问题没问清前，不进入 `sp_prepare`。
 3. Status rule: 如果存在未完成 workflow、用户询问进度、运行时状态和 controller 记忆不一致，先调用 `sp_status` 对齐事实，再决定后续工具调用。
 4. Prepare rule: 每个将由插件执行的任务都调用 `sp_prepare`。controller 负责给出清晰 task brief，并决定 `design_participation.mode` 是 `none`、`brainstorm` 还是 `design`。

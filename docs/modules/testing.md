@@ -11,11 +11,11 @@
 - `test/support/opencode-e2e/harness.ts`：真实 OpenCode e2e 的隔离环境、临时配置、mock LLM、child process 和 workflow state 读取工具。
 - `test/support/opencode-e2e/logging.ts`：e2e 场景日志 helper，统一输出 suite goal、scenario description、step、verification 和 summary。
 - `test/support/opencode-e2e/harness.test.ts`：harness smoke，以及 `node_runs` / `nodes/*` 读取能力验证。
-- `test/controller-intake.test.ts`：proposal 生成、resume proposal、`sp_prepare` 创建 prepared run、source workflow 导入、`sp_start` 激活 prepared run 或直接创建 run、`sp_start(run_id, resume_input)` 恢复 waiting-user child session 且不等待 child prompt 完成，以及 `entrypoint=execute` 的实现入口派发。
+- `test/controller-intake.test.ts`：proposal 生成、resume proposal、`sp_prepare` 创建 prepared run、v5 `task_brief/design_participation/confirmation`、source workflow 导入、`sp_start` 激活 prepared run 或直接创建 run、`sp_start(prepared_task_id, action=start_prepared_task, start_config)` 写入 workflow spec、`sp_start(run_id, resume_input)` 恢复 waiting-user child session 且不等待 child prompt 完成，以及 `entrypoint=execute` 的实现入口派发。
 - `test/dispatch-transition.test.ts`：intake、plan、task-scoped implementation acceptance、串行 review、code-review 后回到 task graph、retry 和 needs_user 的 dispatch decision。
 - `test/session-orchestrator.test.ts`：node task markdown 模板、session create/reuse adapter 调用。
 - `test/store-node-runs.test.ts`：`node_runs` 创建、`nodes/*/task.md`、`nodes/*/record.json` 和完成状态更新。
-- `test/sp-record-dispatch.test.ts`：legacy record handler 覆盖，验证 `sp_report(plan)` 语义后 dispatch implementer、implementation report 后派发带 task/report 上下文的 acceptance、并行 implementation report 按 child session 归属节点、检查失败后回派 implementer 并恢复 workflow running，并在 `needs_user` 时不派发且通知 parent controller session。
+- `test/sp-record-dispatch.test.ts`：legacy record handler 覆盖，验证 `sp_report(plan)` 语义后 dispatch implementer、`workflow_expansion` 在允许时自动扩展/派发、不允许时进入 `waiting_controller_decision`，implementation report 后派发带 task/report 上下文的 acceptance、并行 implementation report 按 child session 归属节点、检查失败后回派 implementer 并恢复 workflow running，并在 `needs_user` 时不派发且通知 parent controller session。
 - `test/node-progress.test.ts`：child session 事件到节点 progress JSONL 的映射、忽略无关 session、错误摘要。
 - `test/progress-panel.test.ts`：TUI progress panel view-model 和文本渲染。
 - `test/plugin-progress-event.test.ts`：server plugin `event` hook 写入 child progress。
@@ -30,8 +30,10 @@
 workflow progress 是 side-channel 行为，用单元测试验证，不要求 e2e 解析 OpenCode TUI toast：
 
 - `test/tools.test.ts` 断言 public tool registry 只暴露 `sp_status`、`sp_prepare`、`sp_start`、`sp_cancel`、`sp_report`。
+- `test/tools.test.ts` 断言 `sp_status(include_capabilities=true)` 返回 v5 agent catalog、workflow schema、built-in workflow templates 和 examples。
 - `test/tools.test.ts` 断言 `sp_status(include_progress=true)` 返回面向主会话灰色工具结果的 `progress_digest`，包含当前 child activity、最近 progress 和按需展示策略。
 - `test/agents.test.ts` 断言 `super-agent` 在用户询问进展时应调用 `sp_status` 并使用 `include_progress`，而不是向主会话注入高频进度叙述。
+- `test/agents.test.ts` 断言每个新 `super-agent` 会话第一轮固定欢迎语和 v5 prepare/start/controller-decision prompt 协议存在。
 - `test/controller-intake.test.ts` 断言 `sp_prepare` / `sp_start` 发送 `run_started`。
 - `test/session-orchestrator.test.ts` 断言 `dispatch()`、`resumeNode()` 和 `notifyParent()` 在底层 `continueNodeSession()` 不 resolve 时仍会返回。
 - `test/sp-record-dispatch.test.ts` 断言 `sp_report` 在后续 child prompt 不 resolve 时仍会返回，并且 dispatch 前已登记 `node_runs`。
@@ -45,6 +47,7 @@ workflow progress 是 side-channel 行为，用单元测试验证，不要求 e2
 - 新 run 启动和已有 run 恢复应分别覆盖；已有 active run 的恢复应从 durable state 计算下一步。
 - `sp_start(run_id)` 激活 prepared run 时，如果已有 `task_graph` 且 phase 为 plan 完成态，应派发 runnable implementer；如果所有 graph task 已完成检查，应进入 finish/recovery，而不是重新派 designer/planner。
 - `sp_report(status: "progress")` 只更新记录和 progress，不触发 downstream dispatch。
+- `sp_report(workflow_expansion)` 在 auto expansion policy 允许时应用任务/节点扩展；不允许时进入 `waiting_controller_decision` 并返回可执行 controller decision。
 - 并行 running node 的 `sp_report` 必须按 child session 归属到正确 node，不能用最后一个 running node 兜底猜测。
 - `needs_user` 必须写入 `pending_question`、停止派发，并向 `parent_session_id` 投递 controller prompt。
 - `sp_start(run_id, resume_input)` 必须校验 `source_node_id`、清空 `pending_question`，并恢复原 waiting child session；普通 `sp_start(run_id)` 不能绕过等待用户输入。

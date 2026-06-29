@@ -189,6 +189,93 @@ describe("sp_prepare and sp_start tools", () => {
     }
   })
 
+  test("sp_prepare accepts v5 task brief and sp_start writes workflow spec from start_config", async () => {
+    const project = mkdtempSync(join(tmpdir(), "sp-v5-prepare-start-"))
+    try {
+      const store = createProjectStore(project)
+      const dispatched: Array<{ agent: string; phase: string }> = []
+      const prepare = createPrepareTool(
+        store,
+        {
+          async dispatch(args) {
+            dispatched.push({ agent: args.decision.agent, phase: args.decision.phase })
+            return {
+              action: "create_session",
+              session_id: "session-unused",
+              task_markdown: "# Unused",
+            }
+          },
+        },
+      )
+
+      const preparedOutput = await prepare.execute(
+        {
+          task_brief: {
+            goal: "Update controller prompt",
+            scope: "Prompt and tests only",
+            constraints: ["Keep public tools unchanged"],
+            acceptance_criteria: ["Greeting rule is present"],
+            known_context: ["v5 PRD"],
+          },
+          kind: "single-agent",
+          entrypoint: "implement",
+          design_participation: {
+            mode: "none",
+            reason: "The task is scoped.",
+          },
+          confirmation: {
+            required: true,
+            question: "确认按这个单节点任务执行吗？",
+          },
+        },
+        toolContext,
+      )
+
+      const prepared = JSON.parse(toolOutput(preparedOutput))
+      const runRoot = join(store.root, "runs", prepared.prepared_task_id)
+      expect(prepared.prepare_mode).toBe("proposal_only")
+      expect(prepared.confirmation_summary).toContain("Update controller prompt")
+      expect(prepared.required_user_confirmations).toEqual(["确认按这个单节点任务执行吗？"])
+      expect(dispatched).toEqual([])
+      expect(existsSync(join(runRoot, "documents.json"))).toBe(true)
+      const documents = readFileSync(join(runRoot, "documents.json"), "utf8")
+      expect(documents).toContain("request.md")
+      expect(documents).toContain("task.md")
+      expect(documents).toContain("proposal.md")
+      expect(readFileSync(join(runRoot, "task.md"), "utf8")).toContain("Acceptance Criteria")
+
+      const start = createStartTool(store, {
+        async dispatch(args) {
+          dispatched.push({ agent: args.decision.agent, phase: args.decision.phase })
+          return {
+            action: "create_session",
+            session_id: "session-implementer",
+            task_markdown: "# Implement task",
+          }
+        },
+      })
+      const startedOutput = await start.execute(
+        {
+          prepared_task_id: prepared.prepared_task_id,
+          action: "start_prepared_task",
+          start_config: {
+            kind: "built_in_workflow",
+            workflow_id: "single-agent",
+          },
+        },
+        toolContext,
+      )
+
+      const started = JSON.parse(toolOutput(startedOutput))
+      expect(started.state.workflow).toBe("single-agent")
+      expect(started.state.workflow_spec.template_id).toBe("single-agent")
+      expect(readFileSync(join(runRoot, "workflow-spec.json"), "utf8")).toContain("single-agent")
+      expect(dispatched.at(-1)).toEqual({ agent: "sp-implementer", phase: "implement" })
+    } finally {
+      rmSync(project, { recursive: true, force: true })
+    }
+  })
+
   test("sp_start creates a run and writes request, proposal, and changelog files", async () => {
     const project = mkdtempSync(join(tmpdir(), "sp-start-"))
     try {

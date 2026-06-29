@@ -28,6 +28,38 @@ describe("public Superpowers tools", () => {
 })
 
 describe("sp_status tool", () => {
+  test("returns v5 capabilities when requested", async () => {
+    const project = mkdtempSync(join(tmpdir(), "sp-status-capabilities-"))
+    try {
+      const store = createProjectStore(project)
+      const status = createStatusTool(store)
+
+      const output = await status.execute(
+        {
+          include_capabilities: true,
+        },
+        {
+          sessionID: "session-main",
+          messageID: "message-1",
+          agent: "super-agent",
+          directory: project,
+          worktree: project,
+          abort: new AbortController().signal,
+          metadata() {},
+          async ask() {},
+        },
+      )
+
+      const result = JSON.parse(toolOutput(output))
+      expect(result.capabilities.agent_catalog.map((item: { agent: string }) => item.agent)).toContain("sp-planner")
+      expect(result.capabilities.workflow_schema.built_in_workflow_ids).toContain("single-agent")
+      expect(result.capabilities.built_in_workflow_templates.map((item: { id: string }) => item.id)).toContain("bugfix")
+      expect(result.capabilities.workflow_examples.length).toBeGreaterThan(0)
+    } finally {
+      rmSync(project, { recursive: true, force: true })
+    }
+  })
+
   test("returns the current workflow and can focus a task", async () => {
     const project = mkdtempSync(join(tmpdir(), "sp-status-tool-"))
     try {

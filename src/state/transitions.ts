@@ -130,13 +130,16 @@ function statusForRecord(state: WorkflowState, record: WorkflowRecord): Workflow
   if (state.activation === "draft" && record.event === "plan" && record.status === "passed") {
     return record.task_graph?.tasks.length || state.workflow === "plan-only" ? "awaiting_plan_approval" : "waiting_user_decision"
   }
+  if (state.workflow === "design-only" && record.event === "design" && record.status === "passed") return "passed"
   if (state.workflow === "plan-only" && record.event === "plan" && record.status === "passed") return "passed"
+  if (state.workflow === "review-only" && record.event === "code-review" && record.status === "passed") return "passed"
+  if (state.workflow === "single-agent" && record.status === "passed" && state.workflow_spec?.auto_expansion.allow === false) return "passed"
   if (record.event === "finish" && record.status === "passed") return "passed"
   return "running"
 }
 
 function requiresFreshVerificationForFinish(workflow: WorkflowKind): boolean {
-  return workflow === "feature" || workflow === "debug" || workflow === "review" || workflow === "verify-finish"
+  return workflow === "feature" || workflow === "bugfix" || workflow === "debug" || workflow === "review" || workflow === "verify-finish"
 }
 
 function normalizeArtifactRefs(artifacts: NonNullable<WorkflowRecord["artifacts"]>): WorkflowState["artifacts"] {

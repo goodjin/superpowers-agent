@@ -6,8 +6,9 @@ import { decideNextDispatches } from "../router/transition"
 import { buildChildResumePrompt, buildNodeTaskPacket } from "../session/templates"
 import type { SessionOrchestrator } from "../session/orchestrator"
 import type { ProjectStore } from "../state/store"
-import type { ControllerDecision, ResumeInput, StartAction, WorkflowEntrypoint, WorkflowKind, WorkflowState } from "../state/types"
+import type { ControllerDecision, ResumeInput, StartAction, WorkflowEntrypoint, WorkflowKind, WorkflowOrchestration, WorkflowSpec, WorkflowState } from "../state/types"
 import { buildAllowedControllerDecisions, buildControllerFeedback, inferStartAction, staleStateFeedback } from "../controller/feedback"
+import { createWorkflowSpec, findBuiltInWorkflowTemplate } from "../capabilities/workflows"
 
 type StartOrchestrator = Pick<SessionOrchestrator, "dispatch"> & Partial<Pick<SessionOrchestrator, "resumeNode">>
 
@@ -24,19 +25,110 @@ export function createStartTool(
       entrypoint: tool.schema.string().optional().describe("Confirmed entrypoint"),
       proposal: tool.schema.string().optional().describe("Proposal markdown that was confirmed by the user"),
       run_id: tool.schema.string().optional().describe("Prepared run id to activate after plan review"),
-      start_action: tool.schema.enum(["start_entrypoint", "approve_design", "approve_plan", "resume_user_input", "retry_node", "resolve_controller_decision"]).optional().describe("Explicit start action."),
+      prepared_task_id: tool.schema.string().optional().describe("V5 alias for run_id."),
+      action: tool.schema.enum(["start_prepared_task", "start_entrypoint", "approve_design", "approve_plan", "resume_user_input", "retry_node", "resolve_controller_decision"]).optional().describe("V5 explicit action. start_prepared_task aliases start_entrypoint."),
+      start_action: tool.schema.enum(["start_prepared_task", "start_entrypoint", "approve_design", "approve_plan", "resume_user_input", "retry_node", "resolve_controller_decision"]).optional().describe("Explicit start action."),
+      start_config: tool.schema
+        .object({
+          kind: tool.schema.enum(["built_in_workflow", "orchestration"]).describe("Whether to use a built-in template or controller-provided orchestration."),
+          workflow_id: tool.schema.string().optional().describe("Built-in workflow id."),
+          auto_expansion: tool.schema
+            .object({
+              allow: tool.schema.boolean().optional(),
+              reason: tool.schema.string().optional(),
+            })
+            .optional()
+            .describe("Override template auto expansion policy."),
+          orchestration: tool.schema
+            .object({
+              id: tool.schema.string().optional(),
+              title: tool.schema.string().optional(),
+              nodes: tool.schema.array(
+                tool.schema.object({
+                  id: tool.schema.string(),
+                  title: tool.schema.string().optional(),
+                  agent: tool.schema.string(),
+                  phase: tool.schema.string().optional(),
+                  task_id: tool.schema.string().optional(),
+                  depends_on: tool.schema.array(tool.schema.string()).optional(),
+                  input_documents: tool.schema.array(tool.schema.string()).optional(),
+                  output_documents: tool.schema.array(tool.schema.string()).optional(),
+                  report_contract: tool.schema.array(tool.schema.string()).optional(),
+                }),
+              ),
+            })
+            .optional()
+            .describe("Controller-provided workflow orchestration. It may contain a single node."),
+        })
+        .optional()
+        .describe("V5 workflow start configuration."),
       expected_state_version: tool.schema.string().optional().describe("Optional optimistic concurrency guard for approval or retry actions."),
       task_id: tool.schema.string().optional().describe("Optional task id to resume when activating a prepared plan"),
       session: tool.schema.string().optional().describe("Controller session id"),
       controller_decision: tool.schema
         .object({
-          kind: tool.schema.enum(["continue_existing_graph", "retry_node", "accept_partial_result", "mark_blocked", "request_reprepare"]).describe("Controller decision kind"),
+          kind: tool.schema.enum(["continue_existing_graph", "retry_node", "accept_partial_result", "mark_blocked", "request_reprepare", "apply_workflow_patch", "replace_orchestration"]).describe("Controller decision kind"),
           node_id: tool.schema.string().optional().describe("Node id the decision targets"),
           task_id: tool.schema.string().optional().describe("Task id the decision targets"),
           reason: tool.schema.string().optional().describe("Controller-facing reason for this decision"),
           evidence_refs: tool.schema.array(tool.schema.string()).optional().describe("Durable evidence refs accepted by the controller"),
           required_user_action: tool.schema.string().optional().describe("User action required after mark_blocked"),
           reuse_session: tool.schema.boolean().optional().describe("Whether the controller expects session reuse"),
+          workflow_patch: tool.schema
+            .object({
+              mode: tool.schema.enum(["append", "replace"]).optional(),
+              reason: tool.schema.string().optional(),
+              tasks: tool.schema
+                .array(
+                  tool.schema.object({
+                    id: tool.schema.string(),
+                    title: tool.schema.string(),
+                    summary: tool.schema.string(),
+                    depends_on: tool.schema.array(tool.schema.string()),
+                    agent: tool.schema.string().optional(),
+                    files: tool.schema.array(tool.schema.string()).optional(),
+                    test_commands: tool.schema.array(tool.schema.string()).optional(),
+                  }),
+                )
+                .optional(),
+              nodes: tool.schema
+                .array(
+                  tool.schema.object({
+                    id: tool.schema.string(),
+                    title: tool.schema.string().optional(),
+                    agent: tool.schema.string(),
+                    phase: tool.schema.string().optional(),
+                    task_id: tool.schema.string().optional(),
+                    depends_on: tool.schema.array(tool.schema.string()).optional(),
+                    input_documents: tool.schema.array(tool.schema.string()).optional(),
+                    output_documents: tool.schema.array(tool.schema.string()).optional(),
+                    report_contract: tool.schema.array(tool.schema.string()).optional(),
+                  }),
+                )
+                .optional(),
+            })
+            .optional()
+            .describe("Workflow expansion patch selected by controller."),
+          orchestration: tool.schema
+            .object({
+              id: tool.schema.string().optional(),
+              title: tool.schema.string().optional(),
+              nodes: tool.schema.array(
+                tool.schema.object({
+                  id: tool.schema.string(),
+                  title: tool.schema.string().optional(),
+                  agent: tool.schema.string(),
+                  phase: tool.schema.string().optional(),
+                  task_id: tool.schema.string().optional(),
+                  depends_on: tool.schema.array(tool.schema.string()).optional(),
+                  input_documents: tool.schema.array(tool.schema.string()).optional(),
+                  output_documents: tool.schema.array(tool.schema.string()).optional(),
+                  report_contract: tool.schema.array(tool.schema.string()).optional(),
+                }),
+              ),
+            })
+            .optional()
+            .describe("Replacement orchestration selected by controller."),
         })
         .optional()
         .describe("Decision chosen by the controller from allowed_controller_decisions."),
@@ -52,7 +144,8 @@ export function createStartTool(
     },
     async execute(args, context) {
       const sessionID = args.session ?? context.sessionID
-      const currentForVersion = args.run_id ? store.readRun(args.run_id) : store.readCurrent()
+      const runID = args.run_id ?? args.prepared_task_id
+      const currentForVersion = runID ? store.readRun(runID) : store.readCurrent()
       const currentStateVersion = currentForVersion?.state_version ?? (currentForVersion ? `${currentForVersion.updated_at}:legacy` : undefined)
       if (args.expected_state_version && currentForVersion && args.expected_state_version !== currentStateVersion) {
         return JSON.stringify(
@@ -65,17 +158,18 @@ export function createStartTool(
           2,
         )
       }
+      const requestedAction = normalizeStartAction((args.action ?? args.start_action) as StartAction | undefined)
       const startAction = currentForVersion ? inferStartAction(currentForVersion, {
-        start_action: args.start_action as StartAction | undefined,
+        start_action: requestedAction,
         resume_input: args.resume_input,
         task_id: args.task_id,
-      }) : (args.start_action as StartAction | undefined) ?? "start_entrypoint"
+      }) : requestedAction ?? "start_entrypoint"
 
       if (startAction === "resolve_controller_decision") {
-        if (!args.run_id) throw new Error("sp_start resolve_controller_decision requires run_id.")
+        if (!runID) throw new Error("sp_start resolve_controller_decision requires run_id or prepared_task_id.")
         if (!args.controller_decision) throw new Error("sp_start resolve_controller_decision requires controller_decision.")
-        const current = store.readRun(args.run_id)
-        if (!current) throw new Error(`No Superpowers workflow found for run ${args.run_id}.`)
+        const current = store.readRun(runID)
+        if (!current) throw new Error(`No Superpowers workflow found for run ${runID}.`)
         const decision = args.controller_decision as ControllerDecision
         if (!isAllowedControllerDecision(current, decision)) {
           return JSON.stringify(
@@ -119,13 +213,13 @@ export function createStartTool(
       }
 
       if (startAction === "resume_user_input" || args.resume_input) {
-        if (!args.run_id) throw new Error("sp_start resume_input requires run_id.")
+        if (!runID) throw new Error("sp_start resume_input requires run_id or prepared_task_id.")
         if (!orchestrator?.resumeNode) throw new Error("sp_start resume_input requires a session orchestrator with resumeNode.")
         if (!args.resume_input) throw new Error("sp_start resume_user_input requires resume_input.")
-        const before = store.readRun(args.run_id)
+        const before = store.readRun(runID)
         const pendingQuestion = before?.pending_question
         const resumed = store.consumePendingQuestion({
-          runID: args.run_id,
+          runID,
           parentSessionID: sessionID,
           resumeInput: args.resume_input as ResumeInput,
         })
@@ -168,11 +262,11 @@ export function createStartTool(
       let state
       let dispatches: Array<Record<string, string | undefined>> = []
       let startMode: "new" | "resume" = "new"
-      if (args.run_id) {
+      if (runID) {
         startMode = "resume"
         if (startAction === "approve_design") {
           state = store.approveDesign({
-            runID: args.run_id,
+            runID,
             parentSessionID: sessionID,
             approvedBySessionID: sessionID,
           })
@@ -185,7 +279,7 @@ export function createStartTool(
           })
         } else if (startAction === "approve_plan") {
           state = store.approvePlan({
-            runID: args.run_id,
+            runID,
             parentSessionID: sessionID,
             approvedBySessionID: sessionID,
           })
@@ -198,7 +292,7 @@ export function createStartTool(
           })
         } else {
           state = store.activateRun({
-            runID: args.run_id,
+            runID,
             parentSessionID: sessionID,
           })
         }
@@ -214,6 +308,20 @@ export function createStartTool(
           parentSessionID: sessionID,
         })
         state = store.startRun(start)
+      }
+      const workflowSpec = buildWorkflowSpecFromStartConfig({
+        runID: state.id,
+        startConfig: args.start_config,
+        fallbackWorkflow: state.workflow,
+      })
+      if (workflowSpec) {
+        state = store.setWorkflowSpec({
+          runID: state.id,
+          parentSessionID: sessionID,
+          workflowSpec,
+          workflow: workflowSpec.template_id ?? state.workflow,
+          entrypoint: entrypointForWorkflowSpec(workflowSpec, state.entrypoint),
+        })
       }
       if (dispatches.length === 0 && startAction !== "approve_design" && startAction !== "approve_plan") {
         dispatches = await dispatchStart({
@@ -365,7 +473,9 @@ async function resolveControllerDecision(args: {
     }
     case "accept_partial_result":
     case "mark_blocked":
-    case "request_reprepare": {
+    case "request_reprepare":
+    case "apply_workflow_patch":
+    case "replace_orchestration": {
       const state = args.store.resolveControllerDecision({
         runID: args.state.id,
         parentSessionID: args.sessionID,
@@ -463,6 +573,93 @@ function createPlanDecision() {
 
 function isNodeAgentName(agent: string): agent is NodeAgentName {
   return agent in AGENT_SKILL_MAP
+}
+
+function normalizeStartAction(action: StartAction | undefined): StartAction | undefined {
+  if (action === "start_prepared_task") return "start_entrypoint"
+  return action
+}
+
+type StartConfigInput = {
+  kind?: "built_in_workflow" | "orchestration"
+  workflow_id?: string
+  auto_expansion?: {
+    allow?: boolean
+    reason?: string
+  }
+  orchestration?: WorkflowOrchestration
+}
+
+function buildWorkflowSpecFromStartConfig(args: {
+  runID: string
+  startConfig: unknown
+  fallbackWorkflow: WorkflowKind
+}): WorkflowSpec | undefined {
+  const config = normalizeStartConfig(args.startConfig)
+  if (!config) {
+    return undefined
+  }
+  if (config.kind === "built_in_workflow") {
+    const template = findBuiltInWorkflowTemplate(config.workflow_id)
+    if (!template) throw new Error(`Unknown built-in workflow template: ${config.workflow_id ?? "(missing workflow_id)"}.`)
+    return createWorkflowSpec({
+      id: `${args.runID}-workflow-spec`,
+      kind: "built_in_workflow",
+      templateID: template.id,
+      orchestration: template.orchestration,
+      autoExpansionAllow: config.auto_expansion?.allow,
+      autoExpansionReason: config.auto_expansion?.reason,
+    })
+  }
+  if (!config.orchestration?.nodes?.length) {
+    throw new Error("sp_start start_config.kind=orchestration requires orchestration.nodes.")
+  }
+  return createWorkflowSpec({
+    id: `${args.runID}-workflow-spec`,
+    kind: "orchestration",
+    title: config.orchestration.title,
+    orchestration: config.orchestration,
+    autoExpansionAllow: config.auto_expansion?.allow ?? false,
+    autoExpansionReason: config.auto_expansion?.reason ?? "Controller-provided orchestration defaults to bounded unless explicitly allowed.",
+  })
+}
+
+function normalizeStartConfig(value: unknown): StartConfigInput | undefined {
+  if (!value || typeof value !== "object") return undefined
+  const input = value as StartConfigInput
+  if (!input.kind) return undefined
+  return input
+}
+
+function entrypointForWorkflowSpec(spec: WorkflowSpec, fallback: WorkflowEntrypoint): WorkflowEntrypoint {
+  const first = spec.orchestration.nodes[0]
+  const phase = first?.phase ?? first?.id
+  if (isWorkflowEntrypoint(phase)) return phase
+  return fallback
+}
+
+function isWorkflowEntrypoint(value: string | undefined): value is WorkflowEntrypoint {
+  if (!value) return false
+  return [
+    "feature",
+    "bugfix",
+    "debug",
+    "design-only",
+    "plan-only",
+    "review",
+    "review-only",
+    "verify-finish",
+    "parallel-investigate",
+    "single-agent",
+    "design",
+    "plan",
+    "execute",
+    "debug",
+    "review",
+    "verify",
+    "investigate",
+    "implement",
+  ].includes(value)
 }
 
 function nextDispatchNodeID(index: number, phase: string, taskID?: string): string {

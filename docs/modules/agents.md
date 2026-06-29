@@ -44,11 +44,14 @@ agents 模块负责注入 Superpowers Controller 的 OpenCode agent 配置。`su
 agent prompt 不能成为 workflow state machine。职责边界如下：
 
 - `super-agent` 理解用户意图、调用 `sp_status` 读取状态、向用户确认 proposal/recovery action，然后调用 `sp_prepare`、`sp_start` 或 `sp_cancel`。
+- 每个新的 `super-agent` 会话第一轮 assistant 回复必须先输出固定欢迎语：`欢迎使用superpowers主控插件，我将按superpowers工作流程完成您的任务。` 这通过 `src/agents/index.ts` prompt 约束实现；插件当前不直接注入 assistant message。
 - `super-agent` 可以解释 runtime 返回的 state 和 dispatches，但不能根据自然语言自行创建 child session 或跳过 transition。
+- `super-agent` 需要能力目录时调用 `sp_status(include_capabilities=true)`，读取 agent catalog、workflow schema、built-in workflow templates 和 examples。
+- 每个执行任务先 `sp_prepare`，再由用户确认后 `sp_start(action="start_prepared_task", prepared_task_id, start_config)`；`start_config` 可选内置 workflow id 或自定义 orchestration。
 - `super-agent` 收到 `waiting_user` / `pending_question` controller prompt 后，只负责在主会话里问用户；用户回答后调用 `sp_start(run_id, resume_input)`，不能替用户决定答案。
 - 节点 agent 只读取 node task packet 中给出的 scope、artifacts 和 required outputs。
 - 节点 agent 结束当前节点时调用 `sp_report`。它不能在 report 里提交 `next_action`、`child_session_id`、`reuse_session_id` 或自造 workflow transition。
-- planner 可以提交 `task_graph`，但 runtime 负责校验依赖、共享写文件隐式依赖和 runnable task。
+- planner 或其他 node 可以提交 `task_graph` 或 `workflow_expansion`，但 runtime 负责校验依赖、共享写文件隐式依赖、auto expansion policy 和 runnable task。
 - implementer、reviewer、verifier 和 finisher 不能把 UI progress、Todo 状态或口头完成声明当成 gate；gate 必须通过 `sp_report` 的结构化字段和 artifacts 落盘。
 
 `entrypoint` 只影响 run 的初始入口或用户确认的恢复意图。已有 active run 的下一步由 durable state、`node_runs`、task graph 和 transition 规则决定，不能只因为 `entrypoint=implement` 就重新派发 designer/planner 或 implementer。新 feature run 使用 `entrypoint=execute` 且没有更具体 durable state 时，入口 agent 是 `sp-implementer`。
