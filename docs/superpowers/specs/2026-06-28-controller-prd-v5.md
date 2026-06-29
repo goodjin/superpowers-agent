@@ -228,7 +228,7 @@ type WorkflowNodeSpec = {
 type WorkflowDocumentSpec = {
   id: string
   title: string
-  kind: "workflow_artifact" | "workspace_output"
+  kind: "workflow_artifact"
   path: string
   producer_node_id: string
   consumer_node_ids?: string[]
@@ -258,7 +258,6 @@ type WorkflowEdgeSpec = {
 - `nodes[].consumes` 和 `nodes[].produces` 只能引用 `documents[].id`。
 - `documents[].producer_node_id` 必须引用存在的 node。
 - `kind="workflow_artifact"` 的 `path` 相对 `.opencode/superpowers/runs/<run-id>/`，例如 `spec.md`、`plan.md`、`task_graph.json`、`reports/<task-id>/report.md`。
-- `kind="workspace_output"` 的 `path` 相对项目工作区，例如 `docs/features/<name>.md` 或 `docs/modules/<module>.md`。workspace output 默认不是 node context，除非 workflow spec 显式要求插件读取并作为 source artifact 传递。
 - edge 只能引用存在的 node。
 - graph 可以是 DAG；第一版不支持环，retry 通过新 attempt 记录实现。
 - 没有入边的 node 是 initial runnable node。
@@ -266,11 +265,10 @@ type WorkflowEdgeSpec = {
 
 ## 7. Workflow Document Lifecycle
 
-v5 把“文档”分成三类：
+v5 的 document contract 只描述插件控制的 run-local workflow artifacts。
 
 - runtime control documents: 插件为了调度、恢复和审计生成的内部文件，例如 `workflow-spec.json`、`state.json`、`events.jsonl`、`documents.json`、`nodes/<node-id>/task.md`、`nodes/<node-id>/record.json`、`nodes/<node-id>/fallback-summary.json`。这类文件不直接作为业务上下文让 node 自己查找。
 - workflow artifact documents: 放在 `.opencode/superpowers/runs/<run-id>/` 下、由插件读取并内联传给 node agent 的上下文文件，例如 `request.md`、`spec.md`、`plan.md`、`task_graph.json`、`tasks.json`、`reports/<task-id>/task.md`、`reports/<task-id>/report.md`、`reports/<task-id>/verification.md`。node 消费的 `spec.md`、`plan.md` 指的是这一层。
-- workspace output documents: node agent 根据项目规则或用户要求写入项目工作区的交付文档，例如 `docs/features/*.md`、`docs/bugfix/*.md`、`docs/modules/*.md`。它们默认不是下游 node 的消费材料；只有 workflow spec 显式声明时，插件才读取并作为 source artifact 传递。
 
 生成时机：
 
@@ -279,9 +277,8 @@ v5 把“文档”分成三类：
 3. `sp_start` 派发 node 前，插件生成 `nodes/<node-id>/task.md`。如果 node 绑定 `task_id`，同时生成 `reports/<task-id>/task.md`。
 4. designer/planner 等 node 通过 `sp_report.artifacts` 提交 `spec`、`plan`、`task_graph` 等结构化结果后，插件把它们写入 run 目录下的 workflow artifact candidate，例如 `nodes/<node-id>/output.md` 或 candidate record。
 5. controller 批准后，插件把 candidate promotion 为 canonical workflow artifact，例如 `spec.md`、`plan.md`、`task_graph.json`、`tasks.json`。
-6. 后续 node 派发前，插件读取 `documents[].consumer_node_ids` 允许且已经 canonical 的 workflow artifacts，内联进 node prompt 的 source artifacts。node 不应该自行去项目目录搜索 `spec.md` 或 `plan.md`。
-7. 如果 workflow spec 要求 workspace output，node agent 负责创建或修改项目工作区文件，并在 `sp_report` 中报告路径和摘要；workspace output 是否再被后续 node 消费，需要显式声明为 source artifact。
-8. `sp_report(status="progress")` 产生的 artifact 只能是 candidate/progress；不触发 promotion，也不解锁下游节点。
+6. 后续 node 派发前，插件读取 `documents[].consumer_node_ids` 允许且已经 canonical 的 workflow artifacts，内联进 node prompt 的 source artifacts。node 不应该自行搜索 run 目录之外的 `spec.md` 或 `plan.md`。
+7. `sp_report(status="progress")` 产生的 artifact 只能是 candidate/progress；不触发 promotion，也不解锁下游节点。
 
 常见文档关联：
 
@@ -289,7 +286,6 @@ v5 把“文档”分成三类：
 - plan/task graph 文档：通常由 `sp-planner` 生成，批准后 promotion 为 canonical `plan.md`、`task_graph.json` 和 `tasks.json`，由插件读取并传给 implementer、reviewer 和 verifier。
 - task packet 文档：由插件在 dispatch 时生成，始终绑定具体 `node_id`，用于审计 child prompt。
 - implementation/report/check 文档：由 `sp_report` 写入 node record 和 task-scoped report；接受、验证、代码审查节点按同一 `task_id` 关联。
-- workspace feature/bugfix/module 文档：如果项目规则要求写入 `docs/features/`、`docs/bugfix/` 或 `docs/modules/`，它们是 workspace output。它们可以由 designer、planner、finisher 或 documentation node 生成，但不是默认的 node 消费文档。
 
 ## 8. Runtime Decision Model
 
@@ -446,7 +442,6 @@ v5 需要持久化：
 - controller 生成的 workflow spec 必须落盘。
 - capability catalog 和 workflow examples 是静态能力说明；registered workflow spec 是本次运行的权威计划，两者必须分开。
 - workflow artifacts 必须通过 `documents.json` 记录 document id、run-relative path、producer node、consumer nodes、candidate/canonical 状态和 promotion 事件。
-- workspace outputs 如果需要追踪，也通过 `documents.json` 记录 workspace-relative path、producer node 和是否需要作为 source artifact 传给后续节点。
 - fallback summary 必须落盘，不能只在 tool response 中出现。
 - sp_report result 和 fallback summary result 必须进入统一 node history。
 - late report 不能覆盖 fallback summary 后的新 attempt，除非 controller 显式选择采用。

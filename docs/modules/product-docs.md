@@ -21,8 +21,8 @@ product docs 记录 Superpowers Controller 的产品设计版本、PRD 来源和
 ## Version Policy
 
 - 新的产品级设计变更进入 `docs/superpowers/specs/`。
-- 实现前的范围说明进入 `docs/features/` 或 `docs/bugfix/`。
-- 实现后的模块契约进入 `docs/modules/`。
+- 实现前的范围说明按仓库文档规范放置。
+- 实现后的模块契约按模块文档规范放置。
 - 如果 PRD 和模块文档冲突，先以当前代码和模块文档核验，再回写 PRD。
 
 ## V5 Dynamic Workflow Notes
@@ -33,7 +33,7 @@ v5 PRD 将产品目标从固定 workflow definition 调整为 controller-generat
 - controller 根据用户需求生成 `GeneratedWorkflowSpec`，其中包含 nodes、edges、agent、report contract、document contract、completion policy 和 fallback policy。
 - 插件不提供智能 workflow 规划；它只提供 agent catalog、workflow schema、常用 workflow 示例、结构校验、状态机运行时、派发控制、`sp_report` 结果处理、恢复、取消和可见性。
 - 常用 workflow 示例只作为 controller prompt 的规划参考，不是固定流程，也不是插件根据用户请求生成的建议。
-- v5 增加 document contract：`spec.md`、`plan.md`、`task_graph.json`、task report 和 verification log 是 run 目录下的 workflow artifacts，由插件读取并内联传给后续 node；`docs/features/`、`docs/bugfix/`、`docs/modules/` 等项目文件是 workspace outputs，默认不作为 node context，除非 workflow spec 显式要求导入为 source artifact。
+- v5 增加 document contract：`spec.md`、`plan.md`、`task_graph.json`、task report 和 verification log 是 run 目录下的 workflow artifacts，由插件读取并内联传给后续 node。
 - 每个 agent 完成后应调用 `sp_report`。如果 agent 没有调用，插件生成 fallback summary result，反馈 controller 决定 retry、接受 partial、取消或修改 workflow。
 - v5 不新增 public tool，仍使用 `sp_status`、`sp_prepare`、`sp_start`、`sp_cancel`、`sp_report`。
 - v5 是新的设计目标；当前模块文档仍描述已实现的 v4 runtime contract，直到后续实现落地后再同步更新。
