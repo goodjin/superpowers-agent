@@ -25,18 +25,20 @@ product docs 记录 Superpowers Controller 的产品设计版本、PRD 来源和
 - 实现后的模块契约按模块文档规范放置。
 - 如果 PRD 和模块文档冲突，先以当前代码和模块文档核验，再回写 PRD。
 
-## V5 Dynamic Workflow Notes
+## V5 Agent/Workflow Execution Notes
 
-v5 PRD 将产品目标从固定 workflow definition 调整为 controller-generated bootstrap workflow spec 加 report-driven expansion：
+v5 PRD 将产品目标从固定 workflow definition 调整为 controller-selected execution spec 加 report-driven expansion：
 
 - 插件不再把 `feature`、`debug`、`plan-only`、`review`、`verify-finish`、`parallel-investigate` 等固定流程作为主决策来源。
-- controller 根据用户需求生成简单的 bootstrap `GeneratedWorkflowSpec`，例如 `design -> plan`、单个 `plan` 节点、调查节点或一个 scoped agent task。
-- bootstrap spec 包含 nodes、edges、agent、report contract、document contract、`expansion_policy`、completion policy 和 fallback policy。
+- controller 先判断是否需要委派；可以直接回答、选择单个 agent，或选择/生成多节点 workflow。
+- controller 生成 `GeneratedExecutionSpec`，它可以是 single-agent spec，也可以是 workflow spec；single-agent spec 进入插件后规范化为 one-node run。
+- 插件仍内置 `feature`、`bugfix`、`review`、`verify-finish`、`plan-only`、`parallel-investigate`、`single-agent` 等 workflow templates，方便 controller 选择、裁剪或忽略。
+- execution spec 包含 agent/nodes、edges、report contract、document contract、`expansion_policy`、completion policy 和 fallback policy。
 - `expansion_policy.mode="auto"` 时，planner 或其它 node 在 `sp_report` 中产出的 `task_graph` / `workflow_expansion` 会由插件校验后自动追加到 workflow，并继续派发后续 agent。
 - `workflow_expansion` 显式给出 nodes/edges/documents；`task_graph` 只有在 task agent 或 `expansion_policy.default_task_agent` 能确定目标 agent 时，才会被插件确定性转换为可执行节点。
 - `expansion_policy.mode="disabled"` 时，插件只运行 bootstrap spec 中已有节点；report 中的新任务只保存为 artifact，适用于 design-only、plan-only 或只跑指定节点的场景。
-- 插件不提供智能 workflow 规划；它只提供 agent catalog、workflow schema、常用 workflow 示例、结构校验、状态机运行时、派发控制、`sp_report` 结果处理、恢复、取消和可见性。
-- 常用 workflow 示例只作为 controller prompt 的规划参考，不是固定流程，也不是插件根据用户请求生成的建议。
+- 插件不提供智能 workflow 规划；它只提供 agent catalog、workflow schema、built-in workflow templates、常用 workflow 示例、结构校验、状态机运行时、派发控制、`sp_report` 结果处理、恢复、取消和可见性。
+- 内置 workflow templates 和常用 workflow 示例只作为 controller prompt 的规划参考，不是固定流程，也不是插件根据用户请求生成的建议。
 - v5 增加 document contract：`spec.md`、`plan.md`、`task_graph.json`、task report 和 verification log 是 run 目录下的 workflow artifacts，由插件读取并内联传给后续 node。
 - 每个 agent 完成后应调用 `sp_report`。如果 agent 没有调用，插件生成 fallback summary result，反馈 controller 决定 retry、接受 partial、取消或修改 workflow。
 - v5 不新增 public tool，仍使用 `sp_status`、`sp_prepare`、`sp_start`、`sp_cancel`、`sp_report`。
