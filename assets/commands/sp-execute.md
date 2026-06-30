@@ -3,6 +3,6 @@ description: Execute the current Superpowers plan
 agent: superpowers
 ---
 
-Execute planned workflow tasks for:
+Call sp_status, ask for confirmation if needed, then sp_start for:
 
 $ARGUMENTS

@@ -1,3 +1,5 @@
+import { existsSync, readFileSync } from "node:fs"
+import { isAbsolute, join, normalize } from "node:path"
 import type { DispatchDecision } from "../router/transition"
 import type { SessionAdapter } from "./adapter"
 import { buildNodeTaskPrompt } from "./templates"
@@ -7,6 +9,11 @@ export type SessionDispatchResult = {
   action: "create_session" | "reuse_session"
   session_id: string
   task_markdown: string
+}
+
+export type SessionResumeResult = {
+  action: "resume_session"
+  session_id: string
 }
 
 export type SessionOrchestrator = ReturnType<typeof createSessionOrchestrator>
@@ -21,7 +28,12 @@ export function createSessionOrchestrator(adapter: SessionAdapter) {
       packet: NodeTaskPacket
       onSessionCreated?: (args: { sessionID: string; taskMarkdown: string }) => Promise<void>
     }): Promise<SessionDispatchResult> {
-      const taskMarkdown = buildNodeTaskPrompt(args.packet)
+      const packet = inlineRequiredArtifacts({
+        project: args.project,
+        runID: args.runID,
+        packet: args.packet,
+      })
+      const taskMarkdown = buildNodeTaskPrompt(packet)
       await adapter.showProgress({
         stage: "dispatch_started",
         title: "Superpowers dispatch",
@@ -29,15 +41,28 @@ export function createSessionOrchestrator(adapter: SessionAdapter) {
         variant: "info",
       })
       if (args.decision.action === "reuse_session") {
-        await adapter.continueNodeSession({
+        if (args.onSessionCreated) {
+          await args.onSessionCreated({
+            sessionID: args.decision.session_id,
+            taskMarkdown,
+          })
+        }
+        const scheduled = scheduleNodePrompt(adapter, {
           sessionID: args.decision.session_id,
           agent: args.decision.agent,
           prompt: taskMarkdown,
+          failure: {
+            stage: "dispatch_failed",
+            title: "Superpowers dispatch",
+            message: `Failed to prompt ${args.decision.agent} for ${args.packet.node_id}.`,
+            variant: "error",
+          },
         })
+        if (shouldAwaitScheduledPrompt()) await scheduled
         await adapter.showProgress({
           stage: "node_running",
           title: "Superpowers dispatch",
-          message: `Reused ${args.decision.agent} for ${args.packet.node_id}.`,
+          message: `Scheduled ${args.decision.agent} for ${args.packet.node_id}.`,
           variant: "info",
         })
         return {
@@ -58,15 +83,22 @@ export function createSessionOrchestrator(adapter: SessionAdapter) {
           taskMarkdown,
         })
       }
-      await adapter.continueNodeSession({
+      const scheduled = scheduleNodePrompt(adapter, {
         sessionID,
         agent: args.decision.agent,
         prompt: taskMarkdown,
+        failure: {
+          stage: "dispatch_failed",
+          title: "Superpowers dispatch",
+          message: `Failed to prompt ${args.decision.agent} for ${args.packet.node_id}.`,
+          variant: "error",
+        },
       })
+      if (shouldAwaitScheduledPrompt()) await scheduled
       await adapter.showProgress({
         stage: "node_running",
         title: "Superpowers dispatch",
-        message: `Created ${args.decision.agent} for ${args.packet.node_id}.`,
+        message: `Scheduled ${args.decision.agent} for ${args.packet.node_id}.`,
         variant: "success",
       })
       return {
@@ -75,5 +107,137 @@ export function createSessionOrchestrator(adapter: SessionAdapter) {
         task_markdown: taskMarkdown,
       }
     },
+    async resumeNode(args: {
+      sessionID: string
+      agent: string
+      prompt: string
+    }): Promise<SessionResumeResult> {
+      const scheduled = scheduleNodePrompt(adapter, {
+        sessionID: args.sessionID,
+        agent: args.agent,
+        prompt: args.prompt,
+        failure: {
+          stage: "dispatch_failed",
+          title: "Superpowers dispatch",
+          message: `Failed to resume ${args.agent} in ${args.sessionID}.`,
+          variant: "error",
+        },
+      })
+      if (shouldAwaitScheduledPrompt()) await scheduled
+      await adapter.showProgress({
+        stage: "node_resumed",
+        title: "Superpowers dispatch",
+        message: `Scheduled resume for ${args.agent} in ${args.sessionID}.`,
+        variant: "info",
+      })
+      return {
+        action: "resume_session",
+        session_id: args.sessionID,
+      }
+    },
+    async notifyParent(args: {
+      sessionID: string
+      agent: string
+      prompt: string
+    }): Promise<void> {
+      const scheduled = scheduleNodePrompt(adapter, {
+        sessionID: args.sessionID,
+        agent: args.agent,
+        prompt: args.prompt,
+        failure: {
+          stage: "dispatch_failed",
+          title: "Superpowers workflow",
+          message: "Failed to notify controller session about pending user input.",
+          variant: "error",
+        },
+      })
+      if (shouldAwaitScheduledPrompt()) await scheduled
+      await adapter.showProgress({
+        stage: "parent_notified",
+        title: "Superpowers workflow",
+        message: "Scheduled controller session notification about pending user input.",
+        variant: "warning",
+      })
+    },
   }
+}
+
+function inlineRequiredArtifacts(args: {
+  project: string
+  runID: string
+  packet: NodeTaskPacket
+}): NodeTaskPacket {
+  if (args.packet.required_artifacts.length === 0) return args.packet
+  const runRoot = join(args.project, ".opencode", "superpowers", "runs", args.runID)
+  return {
+    ...args.packet,
+    source_artifacts: args.packet.required_artifacts.map((artifact) => {
+      const path = resolveArtifactPath(runRoot, artifact.path)
+      if (!path) {
+        return {
+          ...artifact,
+          missing: "artifact path escapes the workflow run directory.",
+        }
+      }
+      if (!existsSync(path)) {
+        return {
+          ...artifact,
+          missing: `not found under ${runRoot}`,
+        }
+      }
+      return {
+        ...artifact,
+        body: readFileSync(path, "utf8"),
+      }
+    }),
+  }
+}
+
+function resolveArtifactPath(runRoot: string, artifactPath: string): string | null {
+  const path = isAbsolute(artifactPath) ? normalize(artifactPath) : normalize(join(runRoot, artifactPath))
+  const normalizedRunRoot = normalize(runRoot)
+  if (path !== normalizedRunRoot && !path.startsWith(`${normalizedRunRoot}/`)) return null
+  return path
+}
+
+function scheduleNodePrompt(
+  adapter: SessionAdapter,
+  args: {
+    sessionID: string
+    agent: string
+    prompt: string
+    failure: {
+      stage: "dispatch_failed"
+      title: string
+      message: string
+      variant: "info" | "success" | "warning" | "error"
+    }
+  },
+): Promise<void> {
+  const scheduled = (async () => {
+    try {
+      await adapter.continueNodeSession({
+        sessionID: args.sessionID,
+        agent: args.agent,
+        prompt: args.prompt,
+      })
+    } catch (error) {
+      await adapter.showProgress({
+        ...args.failure,
+        message: `${args.failure.message} ${errorMessage(error)}`,
+      })
+    }
+  })()
+  void scheduled.catch(() => {})
+  return scheduled
+}
+
+function shouldAwaitScheduledPrompt(): boolean {
+  return process.env.OPENCODE_SUPERPOWERS_E2E_CHILD_REQUEST_MARKERS === "1"
+}
+
+function errorMessage(error: unknown): string {
+  if (error instanceof Error && error.message) return error.message
+  if (typeof error === "string" && error) return error
+  return "Unknown error."
 }

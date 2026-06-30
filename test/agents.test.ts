@@ -7,6 +7,7 @@ describe("createAgentConfig", () => {
     const agents = createAgentConfig()
 
     expect(Object.keys(agents).sort()).toEqual([
+      "sp-acceptance-reviewer",
       "sp-code-reviewer",
       "sp-debugger",
       "sp-designer",
@@ -14,7 +15,6 @@ describe("createAgentConfig", () => {
       "sp-implementer",
       "sp-investigator",
       "sp-planner",
-      "sp-spec-reviewer",
       "sp-verifier",
       "super-agent",
     ])
@@ -28,13 +28,15 @@ describe("createAgentConfig", () => {
       expect(agent, `${agentName} should be injected`).toBeDefined()
       const prompt = String(agent.prompt ?? "")
       const permission = agent.permission as { skill?: Record<string, string> } | undefined
-      const tools = agent.tools as { task?: boolean } | undefined
+      const tools = agent.tools as { task?: boolean; question?: boolean } | undefined
       expect(prompt, `${agentName} should load ${primarySkill}`).toContain(primarySkill)
       expect(prompt, `${agentName} should describe one primary skill`).toContain("Primary skill:")
       expect(prompt, `${agentName} should not mention control-plane fields`).toContain("Do not include next_action")
+      expect(prompt, `${agentName} should route user input through sp_report`).toContain("status needs_user")
       expect(permission?.skill?.["*"], `${agentName} should deny unrelated global skills`).toBe("deny")
       expect(permission?.skill?.[primarySkill], `${agentName} should allow only its primary skill`).toBe("allow")
       expect(tools?.task, `${agentName} should hide native task`).toBe(false)
+      expect(tools?.question, `${agentName} should hide native question`).toBe(false)
     }
   })
 
@@ -46,9 +48,27 @@ describe("createAgentConfig", () => {
     expect((controller?.permission as { task?: string } | undefined)?.task).toBe("deny")
     expect((controller?.tools as { skill?: boolean } | undefined)?.skill).toBe(false)
     expect((controller?.tools as { task?: boolean } | undefined)?.task).toBe(false)
-    expect(String(controller?.prompt ?? "")).toContain("clarify with the user")
-    expect(String(controller?.prompt ?? "")).toContain("call sp_prepare")
-    expect(String(controller?.prompt ?? "")).toContain("Do not load business or development skills")
+      expect(String(controller?.prompt ?? "")).toContain("clarify with the user")
+      expect(String(controller?.prompt ?? "")).toContain("call sp_prepare")
+      expect(String(controller?.prompt ?? "")).toContain("waiting_user")
+      expect(String(controller?.prompt ?? "")).toContain("pending_question")
+      expect(String(controller?.prompt ?? "")).toContain("ask the user")
+      expect(String(controller?.prompt ?? "")).toContain("sp_start")
+      expect(String(controller?.prompt ?? "")).toContain("resume_input")
+      expect(String(controller?.prompt ?? "")).toContain("sp_status with include_progress")
+      expect(String(controller?.prompt ?? "")).toContain("Do not load business or development skills")
+  })
+
+  test("controller prompt requires the v5 first-response greeting and workflow protocol", () => {
+    const controller = createAgentConfig()["super-agent"]
+    const prompt = String(controller?.prompt ?? "")
+
+    expect(prompt).toContain("欢迎使用superpowers主控插件，我将按superpowers工作流程完成您的任务。")
+    expect(prompt).toContain("every new super-agent session")
+    expect(prompt).toContain("sp_status(include_capabilities=true)")
+    expect(prompt).toContain("action=start_prepared_task")
+    expect(prompt).toContain("design-only/plan-only/review-only")
+    expect(prompt).toContain("waiting_controller_decision")
   })
 
   test("inherits global allow permissions for controller and node agents", () => {
@@ -60,7 +80,7 @@ describe("createAgentConfig", () => {
       expect(permission.bash, `${agentName} bash permission`).toBe("allow")
       expect(permission.task, `${agentName} task permission`).toBe("deny")
       expect(permission.skill, `${agentName} skill permission`).toBe(agentName === "super-agent" ? "deny" : "allow")
-      expect(permission.question, `${agentName} question permission`).toBe("allow")
+      expect(permission.question, `${agentName} question permission`).toBe(agentName === "super-agent" ? "allow" : "deny")
       expect(permission.plan_enter, `${agentName} plan enter permission`).toBe("allow")
       expect(permission.plan_exit, `${agentName} plan exit permission`).toBe("allow")
       expect(permission.external_directory, `${agentName} external directory permission`).toBe("allow")
@@ -69,6 +89,9 @@ describe("createAgentConfig", () => {
       expect((permission.read as Record<string, string>)["*.env"], `${agentName} env read permission`).toBe("allow")
       expect((permission.read as Record<string, string>)["*.env.*"], `${agentName} env variant read permission`).toBe("allow")
       expect((agent.tools as { task?: boolean } | undefined)?.task, `${agentName} native task tool`).toBe(false)
+      if (agentName !== "super-agent") {
+        expect((agent.tools as { question?: boolean } | undefined)?.question, `${agentName} native question tool`).toBe(false)
+      }
     }
 
     expect((agents["super-agent"]?.tools as { skill?: boolean; task?: boolean } | undefined)?.skill).toBe(false)

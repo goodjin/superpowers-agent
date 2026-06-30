@@ -24,14 +24,16 @@ The deployment module maintains the local isolated Superagent runtime used to te
   superagent.log
 ```
 
-`superagent` sets `HOME` and `XDG_CONFIG_HOME` to the isolated runtime before calling the bundled OpenCode 1.16.2 binary. With no arguments it opens the caller's current working directory in the OpenCode TUI with `super-agent` selected. Set `SUPERAGENT_PROJECT_DIR` to override that default directory. With arguments it forwards them to OpenCode, so `superagent web`, `superagent agent list`, and `superagent models minimaxi-ultra` work as normal CLI commands.
+`superagent` exposes `start`, `stop`, `restart`, and `status` as lifecycle commands for the background server. Those commands delegate to `scripts/deploy-superagent-runtime.sh` before the launcher switches to the isolated runtime environment.
+
+For normal OpenCode usage, `superagent` sets `HOME` and `XDG_CONFIG_HOME` to the isolated runtime before calling the bundled OpenCode 1.16.2 binary. With no arguments it opens the caller's current working directory in the OpenCode TUI with `super-agent` selected. Set `SUPERAGENT_PROJECT_DIR` to override that default directory. Other arguments are forwarded to OpenCode, so `superagent web`, `superagent agent list`, and `superagent models minimaxi-ultra` work as normal CLI commands.
 
 ## Update Flow
 
 Run:
 
 ```bash
-scripts/deploy-superagent-runtime.sh restart
+superagent restart
 ```
 
 The script rebuilds the server plugin entry at `dist/index.js` and the TUI plugin entry at `dist/tui.js`, syncs `assets/skills`, copies MiniMax provider config and `auth.json` when present, rewrites launchers, stops the previous background process from its pid file, and starts a fresh headless server.
@@ -45,4 +47,5 @@ The generated isolated `opencode.json` sets global OpenCode permissions to `allo
 - The default user config at `~/.config/opencode` is not modified.
 - The Web server defaults to `http://127.0.0.1:5096`.
 - Override the port with `SUPERAGENT_PORT=<port>`.
-- `scripts/deploy-superagent-runtime.sh start` and `restart` manage only the background headless server. Run `superagent` with no arguments to open the default TUI. Run `superagent web` when the Web UI should be launched from the launcher.
+- `superagent start`, `stop`, `restart`, and `status` manage only the background headless server. Run `superagent` with no arguments to open the default TUI. Run `superagent web` when the Web UI should be launched from the launcher.
+- `superagent restart` is the freshness boundary for local development: it rebuilds, rewrites runtime files, stops the previous server, and starts a new one. Exiting the TUI does not stop the background server.

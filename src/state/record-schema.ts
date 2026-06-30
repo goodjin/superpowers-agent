@@ -6,25 +6,27 @@ const nodeEventSchema = z.enum([
   "question",
   "design",
   "plan",
+  "investigation",
   "debug",
   "red-test",
   "implementation",
-  "spec-review",
+  "acceptance",
   "code-review",
   "verification",
   "finish",
 ])
 
-const nodeStatusSchema = z.enum(["passed", "failed", "blocked", "needs_user"])
+const nodeStatusSchema = z.enum(["progress", "passed", "failed", "blocked", "needs_user"])
 
 const artifactNameSchema = z.enum([
   "request",
   "spec",
   "plan",
+  "investigation",
   "root_cause",
   "red_test_log",
   "patch_summary",
-  "spec_review",
+  "acceptance",
   "code_review",
   "verification_log",
   "finish_note",
@@ -38,7 +40,7 @@ const gateNameSchema = z.enum([
   "root_cause_found",
   "red_test_seen",
   "implementation_done",
-  "spec_review_passed",
+  "acceptance_passed",
   "code_review_passed",
   "verification_fresh",
 ])
@@ -49,8 +51,22 @@ const taskSchema = z
     title: z.string().min(1),
     summary: z.string().min(1),
     depends_on: z.array(z.string().min(1)),
+    agent: z.string().min(1).optional(),
     files: z.array(z.string().min(1)).optional(),
     test_commands: z.array(z.string().min(1)).optional(),
+    checks: z
+      .array(
+        z
+          .object({
+            kind: z.enum(["acceptance", "verification", "code_review"]),
+            status: z.enum(["pending", "running", "passed", "failed", "skipped", "stale"]),
+            summary: z.string().optional(),
+            session_id: z.string().optional(),
+            report_path: z.string().optional(),
+          })
+          .strict(),
+      )
+      .optional(),
   })
   .strict()
 
@@ -59,6 +75,55 @@ const taskGraphSchema = z
     tasks: z.array(taskSchema),
   })
   .strict()
+
+const workflowDocumentSchema = z
+  .object({
+    id: z.string().min(1),
+    path: z.string().min(1),
+    kind: z.string().min(1),
+    producer: z.enum(["controller", "plugin", "node", "recovery"]),
+    consumer: z.array(z.string().min(1)).optional(),
+    status: z.enum(["draft", "candidate", "approved", "current", "historical"]).optional(),
+    node_id: z.string().optional(),
+    task_id: z.string().optional(),
+    updated_at: z.string().optional(),
+  })
+  .strict()
+
+const workflowNodeSchema = z
+  .object({
+    id: z.string().min(1),
+    title: z.string().optional(),
+    agent: z.string().min(1),
+    phase: z.string().optional(),
+    task_id: z.string().optional(),
+    depends_on: z.array(z.string().min(1)).optional(),
+    input_documents: z.array(z.string().min(1)).optional(),
+    output_documents: z.array(z.string().min(1)).optional(),
+    report_contract: z.array(z.string().min(1)).optional(),
+  })
+  .strict()
+
+const workflowExpansionSchema = z
+  .object({
+    mode: z.enum(["append", "replace"]).optional(),
+    reason: z.string().optional(),
+    tasks: z.array(taskSchema).optional(),
+    nodes: z.array(workflowNodeSchema).optional(),
+    documents: z.array(workflowDocumentSchema).optional(),
+  })
+  .strict()
+
+const questionOptionSchema = z
+  .union([
+    z.string().min(1).transform((label) => ({ label })),
+    z
+      .object({
+        label: z.string().min(1),
+        description: z.string().optional(),
+      })
+      .strict(),
+  ])
 
 export const spRecordInputSchema = z
   .object({
@@ -72,11 +137,12 @@ export const spRecordInputSchema = z
     question: z
       .object({
         prompt: z.string().min(1),
-        options: z.array(z.string().min(1)).optional(),
+        options: z.array(questionOptionSchema).optional(),
       })
       .strict()
       .optional(),
     task_graph: taskGraphSchema.optional(),
+    workflow_expansion: workflowExpansionSchema.optional(),
   })
   .strict()
 

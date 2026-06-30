@@ -46,10 +46,9 @@ describe("mock LLM server", () => {
           request_id: "route-debug",
           response: {
             type: "tool_call",
-            name: "sp_route",
+            name: "sp_status",
             arguments: {
-              request: "/sp-debug fix tests",
-              command: "/sp-debug",
+              include_history: true,
             },
           },
         },
@@ -63,7 +62,7 @@ describe("mock LLM server", () => {
         {
           type: "function",
           function: {
-            name: "sp_route",
+            name: "sp_status",
             parameters: {},
           },
         },
@@ -72,9 +71,9 @@ describe("mock LLM server", () => {
 
     expect(response.status).toBe(200)
     const body = await response.json()
-    expect(body.choices[0].message.tool_calls[0].function.name).toBe("sp_route")
+    expect(body.choices[0].message.tool_calls[0].function.name).toBe("sp_status")
     expect(body.choices[0].message.tool_calls[0].function.arguments).toBe(
-      JSON.stringify({ request: "/sp-debug fix tests", command: "/sp-debug" }),
+      JSON.stringify({ include_history: true }),
     )
 
     const pending = await fetch(server.url("/__mock/pending")).then((item) => item.json())
@@ -85,10 +84,9 @@ describe("mock LLM server", () => {
       status: 200,
       stream: false,
       type: "tool_call",
-      name: "sp_route",
+      name: "sp_status",
       arguments: {
-        request: "/sp-debug fix tests",
-        command: "/sp-debug",
+        include_history: true,
       },
     })
   })

@@ -1,8 +1,8 @@
 ---
-description: Start or resume Superpowers debugging workflow
+description: Prepare a Superpowers debugging workflow
 agent: superpowers
 ---
 
-Start debugging workflow for:
+Call sp_status, then sp_prepare kind=debug for:
 
 $ARGUMENTS

@@ -2,17 +2,15 @@ import type { ToolDefinition } from "@opencode-ai/plugin/tool"
 import { noopProgressReporter, type ProgressReporter } from "../progress/reporter"
 import type { SessionOrchestrator } from "../session/orchestrator"
 import type { ProjectStore } from "../state/store"
-import { createNextTool } from "./sp-next"
-import { createRecordTool } from "./sp-record"
+import { createCancelTool } from "./sp-cancel"
 import { createPrepareTool } from "./sp-prepare"
-import { createResetTool } from "./sp-reset"
-import { createRouteTool } from "./sp-route"
-import { createStateTool } from "./sp-state"
+import { createReportTool } from "./sp-report"
+import { createStatusTool } from "./sp-status"
 import { createStartTool } from "./sp-start"
 
 export function createTools(
   store: ProjectStore,
-  orchestrator?: Pick<SessionOrchestrator, "dispatch">,
+  orchestrator?: Pick<SessionOrchestrator, "dispatch"> & Partial<Pick<SessionOrchestrator, "resumeNode" | "notifyParent">>,
   progress: ProgressReporter = noopProgressReporter,
 ): Record<string, ToolDefinition> {
   const dispatchFallback = orchestrator ?? {
@@ -25,12 +23,10 @@ export function createTools(
     },
   }
   return {
-    sp_state: createStateTool(store),
-    sp_route: createRouteTool(store, progress),
+    sp_status: createStatusTool(store),
     sp_prepare: createPrepareTool(store, dispatchFallback, progress),
     sp_start: createStartTool(store, orchestrator, progress),
-    sp_next: createNextTool(store),
-    sp_record: createRecordTool(store, orchestrator, progress),
-    sp_reset: createResetTool(store),
+    sp_cancel: createCancelTool(store),
+    sp_report: createReportTool(store, dispatchFallback, progress),
   }
 }

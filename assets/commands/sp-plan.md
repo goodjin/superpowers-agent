@@ -1,8 +1,8 @@
 ---
-description: Start or resume Superpowers planning workflow
+description: Prepare a Superpowers plan-only workflow
 agent: superpowers
 ---
 
-Start planning workflow for:
+Call sp_status, then sp_prepare kind=plan-only for:
 
 $ARGUMENTS

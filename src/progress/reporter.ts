@@ -8,7 +8,12 @@ export type ProgressStage =
   | "workflow_blocked"
   | "workflow_finished"
   | "dispatch_started"
+  | "dispatch_failed"
   | "node_running"
+  | "node_resumed"
+  | "parent_notified"
+  | "run_resumed"
+  | "controller_decision_resolved"
 
 export type ProgressUpdate = {
   stage: ProgressStage

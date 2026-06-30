@@ -1,4 +1,5 @@
 import type { WorkflowArtifact, WorkflowGate, WorkflowKind, WorkflowMode, WorkflowRecord, WorkflowState } from "./types"
+import { incompleteTaskIDs } from "./task-status"
 
 const GATE_ARTIFACTS: Partial<Record<WorkflowGate, WorkflowArtifact>> = {
   spec_written: "spec",
@@ -6,7 +7,7 @@ const GATE_ARTIFACTS: Partial<Record<WorkflowGate, WorkflowArtifact>> = {
   root_cause_found: "root_cause",
   red_test_seen: "red_test_log",
   implementation_done: "patch_summary",
-  spec_review_passed: "spec_review",
+  acceptance_passed: "acceptance",
   code_review_passed: "code_review",
   verification_fresh: "verification_log",
 }
@@ -36,6 +37,7 @@ export function createInitialState(args: {
     goal: args.goal,
     created_at: now,
     updated_at: now,
+    state_version: `${now}:created`,
     gates: args.gates ?? {},
     artifacts: {},
     node_runs: [],
@@ -47,29 +49,35 @@ export function applyRecord(state: WorkflowState, record: WorkflowRecord): Workf
   const gateUpdates = record.gates ?? {}
   const enabledGateUpdates = Object.entries(gateUpdates).filter(([, value]) => value === true)
   if (enabledGateUpdates.length > 3) {
-    throw new Error("sp_record rejected: too many gates updated in one record")
+    throw new Error("sp_report rejected: too many gates updated in one report")
   }
 
-  if (record.event === "finish" && record.status === "passed" && state.gates.verification_fresh !== true) {
-    throw new Error("sp_record rejected: verification_fresh is required before completion records")
+  if (
+    record.event === "finish" &&
+    record.status === "passed" &&
+    requiresFreshVerificationForFinish(state.workflow) &&
+    state.gates.verification_fresh !== true
+  ) {
+    throw new Error("sp_report rejected: verification_fresh is required before completion reports")
   }
 
   if (record.event === "finish" && record.status === "passed") {
     const incomplete = incompleteTaskIDs(state)
     if (incomplete.length > 0) {
-      throw new Error(`sp_record rejected: task_graph has incomplete tasks before completion records: ${incomplete.join(", ")}`)
+      throw new Error(`sp_report rejected: task_graph has incomplete tasks before completion reports: ${incomplete.join(", ")}`)
     }
   }
 
   for (const [gate] of enabledGateUpdates) {
     const requiredArtifact = GATE_ARTIFACTS[gate as WorkflowGate]
     if (requiredArtifact && !record.artifacts?.[requiredArtifact] && !state.artifacts[requiredArtifact]) {
-      throw new Error(`sp_record rejected: ${gate} requires ${requiredArtifact} artifact`)
+      throw new Error(`sp_report rejected: ${gate} requires ${requiredArtifact} artifact`)
     }
   }
 
   const now = new Date().toISOString()
-  const artifactRefs = normalizeArtifactRefs(record.artifacts ?? {})
+  const candidateOnly = isDraftCandidateRecord(state, record)
+  const artifactRefs = candidateOnly ? {} : normalizeArtifactRefs(record.artifacts ?? {})
   const nextPhase = phaseForRecord(state, record)
   return {
     ...state,
@@ -77,9 +85,10 @@ export function applyRecord(state: WorkflowState, record: WorkflowRecord): Workf
     current_phase: nextPhase,
     status: statusForRecord(state, record),
     updated_at: now,
-    gates: { ...state.gates, ...gateUpdates },
+    state_version: `${now}:${state.history.length + 1}`,
+    gates: candidateOnly ? state.gates : { ...state.gates, ...gateUpdates },
     artifacts: { ...state.artifacts, ...artifactRefs },
-    task_graph: record.task_graph ?? state.task_graph,
+    task_graph: candidateOnly ? state.task_graph : record.task_graph ?? state.task_graph,
     pending_question: record.status === "needs_user" ? record.question : undefined,
     history: [
       ...state.history,
@@ -93,12 +102,6 @@ export function applyRecord(state: WorkflowState, record: WorkflowRecord): Workf
       },
     ],
   }
-}
-
-function incompleteTaskIDs(state: WorkflowState): string[] {
-  if (!state.task_graph?.tasks.length) return []
-  const passed = new Set(state.node_runs.filter((run) => run.task_id && run.status === "passed").map((run) => run.task_id as string))
-  return state.task_graph.tasks.map((task) => task.id).filter((taskID) => !passed.has(taskID))
 }
 
 function workflowForMode(mode: WorkflowMode): WorkflowKind {
@@ -119,12 +122,24 @@ function workflowForMode(mode: WorkflowMode): WorkflowKind {
 }
 
 function statusForRecord(state: WorkflowState, record: WorkflowRecord): WorkflowState["status"] {
+  if (record.status === "progress") return state.status
   if (record.status === "needs_user") return "waiting_user"
   if (record.status === "blocked") return "blocked"
   if (record.status === "failed") return "failed"
-  if (state.activation === "draft" && record.event === "plan" && record.status === "passed") return "waiting_user"
+  if (state.activation === "draft" && record.event === "design" && record.status === "passed") return "awaiting_design_approval"
+  if (state.activation === "draft" && record.event === "plan" && record.status === "passed") {
+    return record.task_graph?.tasks.length || state.workflow === "plan-only" ? "awaiting_plan_approval" : "waiting_user_decision"
+  }
+  if (state.workflow === "design-only" && record.event === "design" && record.status === "passed") return "passed"
+  if (state.workflow === "plan-only" && record.event === "plan" && record.status === "passed") return "passed"
+  if (state.workflow === "review-only" && record.event === "code-review" && record.status === "passed") return "passed"
+  if (state.workflow === "single-agent" && record.status === "passed" && state.workflow_spec?.auto_expansion.allow === false) return "passed"
   if (record.event === "finish" && record.status === "passed") return "passed"
   return "running"
+}
+
+function requiresFreshVerificationForFinish(workflow: WorkflowKind): boolean {
+  return workflow === "feature" || workflow === "bugfix" || workflow === "debug" || workflow === "review" || workflow === "verify-finish"
 }
 
 function normalizeArtifactRefs(artifacts: NonNullable<WorkflowRecord["artifacts"]>): WorkflowState["artifacts"] {
@@ -148,7 +163,7 @@ function initialPhase(mode: WorkflowMode): string {
     case "parallel-investigate":
       return "investigate"
     case "review":
-      return "spec-review"
+      return "acceptance"
     case "verify-finish":
       return "fresh-verification"
     default:
@@ -163,18 +178,21 @@ function phaseForRecord(state: WorkflowState, record: WorkflowRecord): string {
     case "intake":
       return "confirmed"
     case "design":
+      if (state.activation === "draft" && record.status === "passed") return "awaiting-design-approval"
       return record.status === "passed" ? "design-complete" : "design-retry"
     case "plan":
       if (record.status !== "passed") return "plan-retry"
       return state.activation === "draft" ? "awaiting-plan-approval" : "plan-complete"
+    case "investigation":
+      return record.status === "passed" ? "investigation-complete" : "investigation-retry"
     case "debug":
       return record.status === "passed" ? "root-cause-found" : "debug-retry"
     case "red-test":
       return "red-test-recorded"
     case "implementation":
       return record.status === "passed" ? "implementation-complete" : "implementation-retry"
-    case "spec-review":
-      return record.status === "passed" ? "spec-review-passed" : "implementation-retry"
+    case "acceptance":
+      return record.status === "passed" ? "acceptance-passed" : "implementation-retry"
     case "code-review":
       return record.status === "passed" ? "code-review-passed" : "implementation-retry"
     case "verification":
@@ -186,4 +204,8 @@ function phaseForRecord(state: WorkflowState, record: WorkflowRecord): string {
     default:
       return initialPhase(state.mode)
   }
+}
+
+function isDraftCandidateRecord(state: WorkflowState, record: WorkflowRecord): boolean {
+  return state.activation === "draft" && (record.event === "design" || record.event === "plan")
 }

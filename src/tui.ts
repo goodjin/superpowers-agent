@@ -1,25 +1,17 @@
 import "@opentui/solid/runtime-plugin-support"
-import { createElement, insert, setProp } from "@opentui/solid"
-import { createEffect, createSignal, onCleanup, type Accessor } from "solid-js"
+import { existsSync } from "node:fs"
+import { dirname, join, relative } from "node:path"
+import { createElement, insert } from "@opentui/solid"
+import { createSignal, onCleanup, type Accessor } from "solid-js"
 import { createNodeProgressStore } from "./progress/node-progress"
 import type { NodeProgressEntry } from "./progress/node-progress"
 import { createProjectStore } from "./state/store"
-import {
-  buildQuestionActions,
-  createHttpQuestionBridgeClient,
-  filterWorkflowQuestionRequests,
-  renderCompactQuestionText,
-  renderQuestionBridgeText,
-  type QuestionAction,
-  type QuestionBridgeClient,
-  type QuestionRequest,
-} from "./tui/question-bridge"
 import {
   buildProgressPanelViewModel,
   renderCompactProgressText,
   renderProgressPanelText,
   renderRunningSessionsText,
-  renderUnfinishedTasksText,
+  renderSidebarProgressText,
   renderWorkflowStatusText,
 } from "./tui/progress-panel"
 import type { WorkflowState } from "./state/types"
@@ -27,12 +19,22 @@ import type { WorkflowState } from "./state/types"
 export const RESIDENT_PROGRESS_SLOT_NAMES = [
   "sidebar_footer",
   "sidebar_content",
-  "home_bottom",
   "app_bottom",
-  "session_prompt_right",
 ] as const
 
-type ProgressSlotRenderer = "compact" | "workflow-status" | "sidebar-context"
+type ProgressSlotRenderer = "compact" | "workflow-status" | "running-sessions" | "sidebar"
+
+type WorkflowContext = {
+  project: string
+  state: WorkflowState | null
+  diagnostic?: string
+}
+
+type WorkflowCandidate = {
+  project: string
+  state: WorkflowState
+  source: "current" | "run"
+}
 
 type TuiApi = {
   route: {
@@ -63,29 +65,22 @@ export function createTuiPluginModule() {
     id: "superpowers-controller",
     async tui(api: TuiApi, _options?: unknown, _meta?: unknown) {
       const disposers: Array<() => void> = []
-      const questionClient = createHttpQuestionBridgeClient()
       disposers.push(api.route.register([
         {
           name: "superpowers-progress",
           render() {
-            const state = currentWorkflowState(api)
-            const progress = state ? createNodeProgressStore(api.state.path.directory).readRun(state) : {}
-            return renderProgressPanelText(
-              buildProgressPanelViewModel(state, progress, liveStatusBySession(api, state)),
+            const context = currentWorkflowContext(api)
+            const progress = context.state ? createNodeProgressStore(context.project).readRun(context.state) : {}
+            const text = renderProgressPanelText(
+              buildProgressPanelViewModel(context.state, progress, liveStatusBySession(api, context.state)),
             )
-          },
-        },
-        {
-          name: "superpowers-questions",
-          render() {
-            return createQuestionBridgePanel(api, questionClient)
+            return context.diagnostic ? `${text}\n\n${context.diagnostic}` : text
           },
         },
       ]))
       api.slots?.register({
         slots: residentProgressSlots((slotName) =>
           createProgressSlot(api, createTextElement, {
-            questionClient,
             ...progressSlotOptions(slotName),
           }),
         ),
@@ -98,13 +93,6 @@ export function createTuiPluginModule() {
             description: "Open the Superpowers Controller progress panel",
             category: "Superpowers",
             onSelect: () => api.route.navigate("superpowers-progress"),
-          },
-          {
-            title: "Superpowers Child Questions",
-            value: "superpowers.questions",
-            description: "Review and answer pending child-session questions",
-            category: "Superpowers",
-            onSelect: () => api.route.navigate("superpowers-questions"),
           },
         ]))
       }
@@ -125,9 +113,9 @@ type TextSource = string | Accessor<string>
 
 type CompactProgressSlotOptions = {
   refreshMs?: number
-  questionClient?: QuestionBridgeClient
   maxChars?: number
   renderer?: ProgressSlotRenderer
+  allowGlobal?: boolean
 }
 
 export function createCompactProgressSlot(
@@ -143,83 +131,89 @@ export function createProgressSlot(
   renderText: (value: TextSource) => unknown = createTextElement,
   options: CompactProgressSlotOptions = {},
 ): (_context?: unknown, props?: Record<string, unknown>) => unknown {
-  return (_context, props) => {
-    const sessionID = slotSessionID(props)
+  return (context, props) => {
+    const slotContext = slotContextFromArgs(context, props)
+    const sessionID = slotContext.sessionID
+    const hasSession = typeof sessionID === "string"
+    const isControllerSession = slotContext.agent === "super-agent"
     const refreshMs = options.refreshMs ?? 1000
     if (refreshMs <= 0) {
-      const text = safeProgressSlotText(api, sessionID, props, options.renderer ?? "compact", options.maxChars)
+      const text = safeProgressSlotText(api, sessionID, hasSession, isControllerSession, options.renderer ?? "compact", options.maxChars, options.allowGlobal)
       return text ? renderText(text) : null
     }
-    const [text, setText] = createSignal(safeProgressSlotText(api, sessionID, props, options.renderer ?? "compact", options.maxChars))
+    const initialText = safeProgressSlotText(api, sessionID, hasSession, isControllerSession, options.renderer ?? "compact", options.maxChars, options.allowGlobal)
+    if (!initialText && !hasSession && !options.allowGlobal) return null
+    const [text, setText] = createSignal(initialText)
     const timer = setInterval(() => {
-      void refreshProgressSlotText(api, sessionID, props, options.questionClient, options.renderer ?? "compact", options.maxChars, setText)
+      setText(safeProgressSlotText(api, sessionID, hasSession, isControllerSession, options.renderer ?? "compact", options.maxChars, options.allowGlobal))
     }, refreshMs)
-    void refreshProgressSlotText(api, sessionID, props, options.questionClient, options.renderer ?? "compact", options.maxChars, setText)
+    setText(safeProgressSlotText(api, sessionID, hasSession, isControllerSession, options.renderer ?? "compact", options.maxChars, options.allowGlobal))
     onCleanup(() => clearInterval(timer))
     return renderText(text)
   }
 }
 
-function progressSlotOptions(slotName: string): Pick<CompactProgressSlotOptions, "renderer" | "maxChars"> {
+function progressSlotOptions(slotName: string): Pick<CompactProgressSlotOptions, "renderer" | "maxChars" | "allowGlobal"> {
   switch (slotName) {
     case "app_bottom":
-    case "home_bottom":
+      return { renderer: "workflow-status", maxChars: 180, allowGlobal: false }
     case "sidebar_footer":
-      return { renderer: "workflow-status", maxChars: 100 }
+      return { renderer: "workflow-status", maxChars: 180, allowGlobal: true }
     case "sidebar_content":
-      return { renderer: "sidebar-context" }
-    case "session_prompt_right":
-      return { renderer: "compact", maxChars: 44 }
+      return { renderer: "sidebar", allowGlobal: true }
     default:
       return { renderer: "compact" }
   }
 }
 
-function slotSessionID(props?: Record<string, unknown>): unknown {
-  return typeof props?.session_id === "string" ? props.session_id : props?.sessionID
+function slotContextFromArgs(context?: unknown, props?: Record<string, unknown>): { sessionID?: string; agent?: string } {
+  return {
+    sessionID: slotSessionID(props) ?? slotSessionID(context),
+    agent: slotSessionAgent(props) ?? slotSessionAgent(context),
+  }
+}
+
+function slotSessionID(value?: unknown): string | undefined {
+  if (!isRecord(value)) return undefined
+  if (typeof value.session_id === "string") return value.session_id
+  if (typeof value.sessionID === "string") return value.sessionID
+  const session = value.session
+  if (isRecord(session) && typeof session.id === "string") return session.id
+  return undefined
+}
+
+function slotSessionAgent(value?: unknown): string | undefined {
+  if (!isRecord(value)) return undefined
+  if (typeof value.agent === "string") return value.agent
+  const session = value.session
+  if (isRecord(session) && typeof session.agent === "string") return session.agent
+  return undefined
 }
 
 function safeProgressSlotText(
   api: TuiApi,
   sessionID: unknown,
-  props: Record<string, unknown> | undefined,
+  hasSession: boolean,
+  isControllerSession: boolean,
   renderer: ProgressSlotRenderer,
   maxChars?: number,
+  allowGlobal = false,
 ): string {
   try {
-    const state = currentWorkflowState(api)
-    const progress = state ? createNodeProgressStore(api.state.path.directory).readRun(state) : {}
-    const model = progressModel(api, state, progress, sessionID)
-    if (renderer === "workflow-status") return renderWorkflowStatusText(model, maxChars)
-    if (renderer === "sidebar-context") {
-      return typeof slotSessionID(props) === "string" ? renderRunningSessionsText(model) : renderUnfinishedTasksText(model)
+    const context = currentWorkflowContext(api, sessionID)
+    if (!context.state) {
+      if (!allowGlobal && renderer !== "compact" && !hasSession) return ""
+      return truncateSlotText(context.diagnostic ?? "SP: no active workflow", maxChars)
     }
+    const progress = createNodeProgressStore(context.project).readRun(context.state)
+    const model = progressModel(api, context.state, progress, sessionID, allowGlobal && isControllerSession)
+    if (!allowGlobal && renderer !== "compact" && !hasSession) return ""
+    if (renderer === "workflow-status") return renderWorkflowStatusText(model, maxChars)
+    if (renderer === "running-sessions") return renderRunningSessionsText(model)
+    if (renderer === "sidebar") return renderSidebarProgressText(model)
     return renderCompactProgressText(model, maxChars)
   } catch {
     return "SP: progress unavailable"
-  }
-}
-
-async function refreshProgressSlotText(
-  api: TuiApi,
-  sessionID: unknown,
-  props: Record<string, unknown> | undefined,
-  client: QuestionBridgeClient | undefined,
-  renderer: ProgressSlotRenderer,
-  maxChars: number | undefined,
-  setText: (value: string) => void,
-): Promise<void> {
-  try {
-    if (!client || renderer !== "compact") {
-      setText(safeProgressSlotText(api, sessionID, props, renderer, maxChars))
-      return
-    }
-    const state = currentWorkflowState(api)
-    const questions = filterWorkflowQuestionRequests(state, await client.list(api.state.path.directory))
-    const questionText = renderCompactQuestionText(questions)
-    setText(questionText || safeProgressSlotText(api, sessionID, props, renderer, maxChars))
-  } catch {
-    setText(safeProgressSlotText(api, sessionID, props, renderer, maxChars))
   }
 }
 
@@ -230,14 +224,132 @@ function createTextElement(value: TextSource): unknown {
 }
 
 function currentProgressModel(api: TuiApi, sessionID?: unknown) {
-  const state = currentWorkflowState(api)
-  const progress = state ? createNodeProgressStore(api.state.path.directory).readRun(state) : {}
-  return progressModel(api, state, progress, sessionID)
+  const context = currentWorkflowContext(api, sessionID)
+  const progress = context.state ? createNodeProgressStore(context.project).readRun(context.state) : {}
+  return progressModel(api, context.state, progress, sessionID)
 }
 
-function currentWorkflowState(api: TuiApi): WorkflowState | null {
-  const workflow = createProjectStore(api.state.path.directory)
-  return workflow.readCurrent()
+function currentWorkflowContext(api: TuiApi, sessionID?: unknown): WorkflowContext {
+  const directory = api.state.path.directory
+  const candidate = selectWorkflowCandidate(directory, sessionID)
+  if (candidate) {
+    return {
+      project: candidate.project,
+      state: candidate.state,
+      diagnostic: workflowContextDiagnostic(candidate, directory),
+    }
+  }
+
+  return {
+    project: directory,
+    state: null,
+    diagnostic: `SP: no workflow state in ${formatProjectPath(directory, directory)}`,
+  }
+}
+
+function selectWorkflowCandidate(directory: string, sessionID?: unknown): WorkflowCandidate | null {
+  const candidates = workflowCandidates(directory)
+  const session = typeof sessionID === "string" ? sessionID : undefined
+  if (session) {
+    const matched = latestWorkflowCandidate(candidates.filter((candidate) => isWorkflowSession(candidate.state, session)))
+    if (matched) return matched
+  }
+
+  const unfinished = latestWorkflowCandidate(candidates.filter((candidate) => isUnfinishedWorkflow(candidate.state)))
+  if (unfinished) return unfinished
+
+  return latestWorkflowCandidate(candidates)
+}
+
+function workflowCandidates(directory: string): WorkflowCandidate[] {
+  const seen = new Set<string>()
+  const result: WorkflowCandidate[] = []
+  for (const project of [directory, ...workflowProjectCandidates(directory)]) {
+    for (const candidate of workflowCandidatesForProject(project)) {
+      const key = `${candidate.project}:${candidate.state.id}`
+      if (seen.has(key)) continue
+      seen.add(key)
+      result.push(candidate)
+    }
+  }
+  return result
+}
+
+function workflowCandidatesForProject(project: string): WorkflowCandidate[] {
+  const store = createProjectStore(project)
+  const candidates: WorkflowCandidate[] = []
+  const current = readWorkflowState(project)
+  if (current) candidates.push({ project, state: current, source: "current" })
+  for (const state of store.listRuns()) {
+    candidates.push({ project, state, source: "run" })
+  }
+  return candidates
+}
+
+function readWorkflowState(project: string): WorkflowState | null {
+  if (!existsSync(join(project, ".opencode", "superpowers", "current.json"))) return null
+  return createProjectStore(project).readCurrent()
+}
+
+function latestWorkflowCandidate(candidates: WorkflowCandidate[]): WorkflowCandidate | null {
+  return [...candidates].sort(compareWorkflowCandidate).at(0) ?? null
+}
+
+function compareWorkflowCandidate(left: WorkflowCandidate, right: WorkflowCandidate): number {
+  const updated = workflowTimestamp(right.state) - workflowTimestamp(left.state)
+  if (updated !== 0) return updated
+  if (left.source !== right.source) return left.source === "current" ? -1 : 1
+  return left.state.id.localeCompare(right.state.id)
+}
+
+function workflowTimestamp(state: WorkflowState): number {
+  const parsed = Date.parse(state.updated_at)
+  return Number.isFinite(parsed) ? parsed : 0
+}
+
+function isUnfinishedWorkflow(state: WorkflowState): boolean {
+  return [
+    "intake",
+    "running",
+    "awaiting_design_approval",
+    "awaiting_plan_approval",
+    "waiting_user",
+    "waiting_user_decision",
+    "waiting_controller_decision",
+    "blocked",
+    "failed",
+    "recovered_unknown",
+  ].includes(state.status)
+}
+
+function workflowContextDiagnostic(candidate: WorkflowCandidate, directory: string): string | undefined {
+  if (candidate.project !== directory) {
+    return `SP: using workflow state from ${formatProjectPath(candidate.project, directory)}`
+  }
+  if (candidate.source !== "current") {
+    return `SP: using latest workflow run ${candidate.state.id}`
+  }
+  return undefined
+}
+
+function workflowProjectCandidates(directory: string): string[] {
+  const candidates = [
+    process.env.SUPERAGENT_PROJECT_DIR,
+    process.env.OPENCODE_SUPERPOWERS_PROJECT_DIR,
+    process.env.SUPERAGENT_ROOT ? join(process.env.SUPERAGENT_ROOT, "project") : undefined,
+    process.env.HOME ? join(dirname(process.env.HOME), "project") : undefined,
+  ]
+  return [...new Set(candidates.filter((candidate): candidate is string => Boolean(candidate && candidate !== directory)))]
+}
+
+function formatProjectPath(project: string, directory: string): string {
+  const rel = relative(directory, project)
+  return rel && !rel.startsWith("..") ? rel : project
+}
+
+function truncateSlotText(value: string, maxChars?: number): string {
+  if (!maxChars || value.length <= maxChars) return value
+  return `${value.slice(0, Math.max(0, maxChars - 3))}...`
 }
 
 function progressModel(
@@ -245,8 +357,9 @@ function progressModel(
   state: WorkflowState | null,
   progress: Record<string, NodeProgressEntry[]>,
   sessionID?: unknown,
+  allowControllerFallback = false,
 ) {
-  if (typeof sessionID === "string" && state && !isWorkflowSession(state, sessionID)) {
+  if (typeof sessionID === "string" && state && !isWorkflowSession(state, sessionID) && !allowControllerFallback) {
     return buildProgressPanelViewModel(null, {}, {})
   }
   return buildProgressPanelViewModel(state, progress, liveStatusBySession(api, state))
@@ -264,87 +377,14 @@ function liveStatusBySession(api: TuiApi, state: WorkflowState | null): Record<s
   return result
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null
+}
+
 function formatSessionStatus(status: { type: string; attempt?: number; message?: string } | undefined): string {
   if (!status) return "unknown"
   if (status.type === "retry") return `retry ${status.attempt ?? "?"}${status.message ? `: ${status.message}` : ""}`
   return status.type
-}
-
-function createQuestionBridgePanel(
-  api: TuiApi,
-  client: QuestionBridgeClient = createHttpQuestionBridgeClient(),
-  refreshMs = 1000,
-): unknown {
-  const [status, setStatus] = createSignal("Loading child questions...")
-  const [requests, setRequests] = createSignal<QuestionRequest[]>([])
-  const [actions, setActions] = createSignal<QuestionAction[]>([])
-
-  const refresh = async () => {
-    try {
-      const state = currentWorkflowState(api)
-      const nextRequests = filterWorkflowQuestionRequests(state, await client.list(api.state.path.directory))
-      setRequests(nextRequests)
-      setActions(buildQuestionActions(nextRequests))
-      setStatus(renderQuestionBridgeText(nextRequests))
-    } catch (error) {
-      setRequests([])
-      setActions([])
-      setStatus(`Question bridge unavailable: ${error instanceof Error ? error.message : String(error)}`)
-    }
-  }
-
-  void refresh()
-  const timer = setInterval(() => void refresh(), refreshMs)
-  onCleanup(() => clearInterval(timer))
-
-  const root = createElement("box")
-  setProp(root, "style", { flexDirection: "column", width: "100%", height: "100%" })
-
-  const body = createElement("text")
-  insert(body, status)
-  insert(root, body)
-
-  const select = createElement("select")
-  setProp(select, "focused", true)
-  setProp(select, "showDescription", true)
-  setProp(select, "height", 12)
-  setProp(select, "onSelect", (_index: number, option: { value?: QuestionAction } | null) => {
-    const action = option?.value
-    if (action) void submitQuestionAction(client, action, refresh, setStatus)
-  })
-  createEffect(() => {
-    setProp(select, "options", actions().map((action) => ({
-      name: action.label,
-      description: action.description,
-      value: action,
-    })))
-  })
-  insert(root, select)
-
-  const footer = createElement("text")
-  insert(footer, () => requests().length > 0 ? "Use arrows to choose an action, Enter to submit." : "")
-  insert(root, footer)
-
-  return root
-}
-
-async function submitQuestionAction(
-  client: QuestionBridgeClient,
-  action: QuestionAction,
-  refresh: () => Promise<void>,
-  setStatus: (value: string) => void,
-): Promise<void> {
-  setStatus(`${action.label} submitted...`)
-  try {
-    if (action.type === "reply") {
-      await client.reply(action.sessionID, action.requestID, action.answers)
-    } else {
-      await client.reject(action.sessionID, action.requestID)
-    }
-    await refresh()
-  } catch (error) {
-    setStatus(`Question action failed: ${error instanceof Error ? error.message : String(error)}`)
-  }
 }
 
 export default createTuiPluginModule()

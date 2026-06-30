@@ -18,7 +18,7 @@ export function evaluateToolGate(args: {
     return {
       allowed: false,
       severity: "blocked",
-      reason: `${args.agent} cannot call native task; use sp_start or sp_record so Controller registers node_runs before child prompts`,
+      reason: `${args.agent} cannot call native task; use sp_start or sp_report so Controller registers node_runs before child prompts`,
     }
   }
 

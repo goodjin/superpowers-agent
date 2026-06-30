@@ -67,7 +67,7 @@ Command -> super-agent -> Node Session -> Node Agent -> Primary Skill
 - **Skill**：节点的方法说明，比如 systematic debugging、TDD、verification。
 - **Plugin state/gate/session control**：负责存状态、写 artifact、校验 gate、创建/复用会话、拦截不合规工具调用。
 
-这套设计的关键点是：模型可以负责当前节点的思考和产出，但流程可信性由插件兜住。比如 debug 模式下，缺少 `root_cause` artifact 时，严格模式会阻止修复性写入；完成前没有 `verification_log`，就不能通过 `sp_record` 记录 done。
+这套设计的关键点是：模型可以负责当前节点的思考和产出，但流程可信性由插件兜住。比如 debug 模式下，缺少 `root_cause` artifact 时，严格模式会阻止修复性写入；完成前没有 `verification_log`，就不能通过 `sp_report` 汇报完成。
 
 ## Agents 和 Skills 的关系
 
@@ -81,7 +81,7 @@ Command -> super-agent -> Node Session -> Node Agent -> Primary Skill
 | `sp-debugger` | debug 节点 |
 | `sp-investigator` | 并行只读调查节点 |
 | `sp-implementer` | execute / TDD 节点 |
-| `sp-spec-reviewer` | spec compliance review |
+| `sp-acceptance-reviewer` | acceptance review |
 | `sp-code-reviewer` | code quality review |
 | `sp-verifier` | verification 节点 |
 | `sp-finisher` | finish / branch completion |
@@ -99,11 +99,11 @@ Command -> super-agent -> Node Session -> Node Agent -> Primary Skill
 
 这两组没有互相替代。Agent 是角色，skill 是做事方法。
 
-Agent prompt 没有整段复制 skill 内容。它是新设计的轻量角色规则：说明这个 agent 的职责、权限、primary skill 和结束时要调用 `sp_record`。具体流程细节仍然来自 skill 文件。最终设计要求一个节点会话只加载一个 primary skill；需要另一个 skill 时，插件创建另一个节点会话。
+Agent prompt 没有整段复制 skill 内容。它是新设计的轻量角色规则：说明这个 agent 的职责、权限、primary skill 和结束时要调用 `sp_report`。具体流程细节仍然来自 skill 文件。最终设计要求一个节点会话只加载一个 primary skill；需要另一个 skill 时，插件创建另一个节点会话。
 
 插件会在创建节点会话时注入运行时 skill 上下文。它来自同一份节点定义，包含当前 workflow、phase、agent、`primary_skill` 和节点任务模板。这样 agent prompt、router、节点任务包和运行时系统消息看到的是同一份 skill map。
 
-最终控制权边界是：大模型只执行节点任务并通过 `sp_record` 提交规范化结果；插件负责保存状态、判断结果、创建或复用下一步会话。
+最终控制权边界是：大模型只执行节点任务并通过 `sp_report` 提交规范化结果；插件负责保存状态、判断结果、创建或复用下一步会话。
 
 例子：
 
@@ -113,11 +113,11 @@ Agent prompt 没有整段复制 skill 内容。它是新设计的轻量角色规
   -> 插件创建 workflow run
   -> sp-debugger
   -> 加载一个 primary skill: superpowers-systematic-debugging
-  -> sp_record 提交 root_cause artifact
+  -> sp_report 提交 root_cause artifact
   -> 插件写 artifact、打开 root_cause_found gate、调度下一步
 ```
 
-如果用户在 OpenCode 里直接选择某个节点 agent，比如 `sp-debugger`，它仍然会看到自己的角色 prompt：聚焦 debug、加载 `superpowers-systematic-debugging`、结束时调用 `sp_record`。但直接选择节点 agent 会绕过 super-agent 的需求确认和恢复逻辑，所以推荐通过 `/sp` 或 `/sp-debug` 进入。
+如果用户在 OpenCode 里直接选择某个节点 agent，比如 `sp-debugger`，它仍然会看到自己的角色 prompt：聚焦 debug、加载 `superpowers-systematic-debugging`、结束时调用 `sp_report`。但直接选择节点 agent 会绕过 super-agent 的需求确认和恢复逻辑，所以推荐通过 `/sp` 或 `/sp-debug` 进入。
 
 ## Commands
 
@@ -132,7 +132,7 @@ Commands 以动态注入为主，不再由 installer 复制 markdown command 文
 - `/sp-execute`
 - `/sp-review`
 - `/sp-verify`
-- `/sp-reset`
+- `/sp-cancel`
 
 这样用户 config 更干净，插件升级时 command 文案也跟着更新。
 
@@ -144,7 +144,7 @@ Commands 以动态注入为主，不再由 installer 复制 markdown command 文
 
 - 用户说“继续”时，插件先看当前 workflow state，而不是重新猜意图。
 - 写入、修复、完成声明会经过 gate 检查。
-- 每个节点要用 `sp_record` 记录 artifact 和证据。
+- 每个节点要用 `sp_report` 记录 artifact 和证据。
 - 并行调查先要求证明问题域独立、没有共享写入冲突。
 - 多 agent 分工固定，review / verification 不容易被实现 agent 自己带过。
 - 项目本地有 `state.json` 和 artifacts，后续恢复时有依据。
@@ -231,4 +231,4 @@ bun run e2e:opencode:mock-llm
 bun run test:e2e:opencode
 ```
 
-这个命令会先构建插件，再运行可复用 harness smoke 和 workflow 场景。当前覆盖 debug root cause、strict debug gate、完整 feature lifecycle、`sp_record` 校验恢复、completion verification、active waiting reroute 和 strict execute gate 顺序。
+这个命令会先构建插件，再运行可复用 harness smoke 和 workflow 场景。当前覆盖 debug root cause、strict debug gate、完整 feature lifecycle、`sp_report` 校验恢复、completion verification、active waiting status 查询和 strict execute gate 顺序。

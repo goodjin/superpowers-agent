@@ -1,8 +1,8 @@
 ---
-description: Run Superpowers verification workflow
+description: Prepare a Superpowers verification workflow
 agent: superpowers
 ---
 
-Verify current work before completion:
+Call sp_status, then sp_prepare kind=verify-finish for:
 
 $ARGUMENTS
