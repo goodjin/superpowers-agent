@@ -1,7 +1,8 @@
 import { describe, expect, test } from "bun:test"
-import { existsSync, mkdtempSync, readdirSync } from "node:fs"
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from "node:fs"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { spawnSync } from "node:child_process"
 import { install, mergePluginEntry } from "../src/cli/install"
 
 describe("mergePluginEntry", () => {
@@ -70,4 +71,34 @@ describe("mergePluginEntry", () => {
     }
     expect(commands).toHaveLength(0)
   })
+
+  test("one-click install script installs idempotently through the local CLI", () => {
+    const home = mkdtempSync(join(tmpdir(), "sp-install-home-"))
+    const binDir = join(home, "bin")
+    const fakeOpencode = join(binDir, "opencode")
+    mkdirSync(binDir, { recursive: true })
+    writeFileSync(fakeOpencode, "#!/usr/bin/env bash\nprintf 'opencode 1.16.2\\n'\n", { mode: 0o755 })
+
+    const env = {
+      ...process.env,
+      HOME: home,
+      PATH: `${binDir}:${process.env.PATH ?? ""}`,
+    }
+
+    for (let i = 0; i < 2; i += 1) {
+      const result = spawnSync("bash", ["scripts/install.sh"], {
+        cwd: process.cwd(),
+        env,
+        encoding: "utf8",
+      })
+      expect(result.status, result.stderr || result.stdout).toBe(0)
+      expect(result.stdout).toContain("Superpowers Controller installed.")
+    }
+
+    const config = readFileSync(join(home, ".config", "opencode", "opencode.jsonc"), "utf8")
+    const matches = config.match(/superpowers-controller/g) ?? []
+    expect(matches).toHaveLength(1)
+    expect(existsSync(join(home, ".config", "opencode", "opencode-superpowers.jsonc"))).toBe(true)
+    expect(readdirSync(join(home, ".config", "opencode", "skills")).filter((entry) => entry.startsWith("superpowers-")).length).toBeGreaterThan(0)
+  }, 30_000)
 })

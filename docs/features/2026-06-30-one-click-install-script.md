@@ -20,7 +20,7 @@ Provide a one-click installer for normal users that can be run from a shell, ins
 Recommended public command shape:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/<owner>/<repo>/main/scripts/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/goodjin/superpowers-agent/main/scripts/install.sh | bash
 ```
 
 For local development before a public URL is final:
@@ -132,6 +132,6 @@ The first version does not need automatic rollback. The installer should avoid p
 
 ## Open Questions
 
-- What should the public raw URL be: this repository's final GitHub owner/name or a release-hosted URL?
-- Should the first installer support npm/pnpm fallback when Bun is missing, or should Bun remain the explicit prerequisite for now?
-- Should `scripts/install.sh` install only the OpenCode plugin, or also create a convenience launcher such as `superagent` for normal users?
+- Resolved: use the current repository raw URL, `https://raw.githubusercontent.com/goodjin/superpowers-agent/main/scripts/install.sh`.
+- Resolved: Bun remains an explicit prerequisite for the first installer.
+- Resolved: `scripts/install.sh` installs only the OpenCode plugin and does not create a normal-user `superagent` launcher.

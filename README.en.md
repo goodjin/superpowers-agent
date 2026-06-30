@@ -143,6 +143,14 @@ This plugin helps with longer, stateful, or interruptible work:
 
 The npm package name and CLI command are both `superpowers-controller`.
 
+One-click install:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/goodjin/superpowers-agent/main/scripts/install.sh | bash
+```
+
+Manual install:
+
 ```bash
 bunx superpowers-controller install
 ```
