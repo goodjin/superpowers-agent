@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url"
 import { modify, applyEdits, parse } from "jsonc-parser"
 import { DEFAULT_CONFIG } from "../config/defaults"
 
-export const PACKAGE_NAME = "opencode-superpowers-controller"
+export const PACKAGE_NAME = "superpowers-controller"
 export const CONFIG_FILE_NAME = "opencode-superpowers.jsonc"
 const EXCLUDED_SKILL_DIRS = new Set([
   "superpowers-executing-plans",

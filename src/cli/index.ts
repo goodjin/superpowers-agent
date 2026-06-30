@@ -13,6 +13,6 @@ if (command === "install") {
   if (checks.some((check) => !check.ok)) process.exitCode = 1
 } else {
   console.log(`Usage:
-  opencode-superpowers-controller install
-  opencode-superpowers-controller doctor`)
+  superpowers-controller install
+  superpowers-controller doctor`)
 }

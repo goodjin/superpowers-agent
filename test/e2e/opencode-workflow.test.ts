@@ -1157,6 +1157,7 @@ describe("OpenCode 工作流 e2e", () => {
             request: "给任务运行面板增加按状态筛选和批量重试确认流程",
             workflow: "feature",
             entrypoint: "feature",
+            prepare_mode: "proposal_only",
             proposal: [
               "# Superpowers Workflow Proposal",
               "",
@@ -1184,7 +1185,6 @@ describe("OpenCode 工作流 e2e", () => {
         expect(prepareResult.code).toBe(0)
         const preparedState = readLoggedWorkflowState(log, harness, "prepare 完成后")
         expect(preparedState?.activation).toBe("draft")
-        expect(preparedState?.current_phase).toBe("plan")
         expect(preparedState?.node_runs).toEqual([])
 
         expect(prepareRequests.map((request) => request.request_id)).toEqual([

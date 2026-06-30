@@ -12,7 +12,7 @@
 
 文档第一屏不再强调 `for OpenCode`。OpenCode 只作为当前首个 adapter 和验证环境出现。
 
-当前开发包和命令仍保留 `opencode-superpowers-controller`，因为源码、测试和安装脚本还没有同步改名。后续如果正式改包名，目标名为 `superpowers-controller`。
+2026-06-30 起，npm 包名和 CLI 命令统一为 `superpowers-controller`。不采用 `superpowers-agent`，因为当前项目不是单个 agent，而是负责状态、路由、门禁、会话编排、agent 注入和结果记录的控制层。
 
 ## 边界
 
@@ -25,5 +25,5 @@
 
 - 产品名写 `Superpowers Controller`。
 - 当前实现环境写 `OpenCode adapter`，不要写成产品名的一部分。
-- 需要描述 npm/bin 现状时，可以写 `opencode-superpowers-controller` 是当前开发包名。
-- 需要描述未来包名时，可以写目标为 `superpowers-controller`，但不要把未完成的包名迁移写成已经可用的安装命令。
+- 需要描述 npm/bin 现状时，写 `superpowers-controller`。
+- 需要描述 GitHub 仓库地址时，可以继续使用当前仓库 `goodjin/superpowers-agent`，但不要把仓库名写成产品名或包名。

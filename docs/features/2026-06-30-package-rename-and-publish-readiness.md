@@ -71,4 +71,3 @@ Existing users with the old package entry will not be automatically migrated unl
 - `npm pack --dry-run` shows package name `superpowers-controller` and does not include avoidable test declaration files.
 - README install examples use `bunx superpowers-controller ...`.
 - OpenCode plugin array example uses `"superpowers-controller"`.
-

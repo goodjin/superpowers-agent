@@ -126,6 +126,7 @@ Commands 以动态注入为主，不再由 installer 复制 markdown command 文
 插件注入这些 slash commands：
 
 - `/sp`
+- `/sp-prepare`
 - `/sp-design`
 - `/sp-plan`
 - `/sp-debug`
@@ -151,17 +152,28 @@ Commands 以动态注入为主，不再由 installer 复制 markdown command 文
 
 ## 安装
 
-当前 OpenCode adapter 的开发包和命令仍使用 `opencode-superpowers-controller`。品牌名已经定为 `Superpowers Controller`，发布包名后续可以单独同步到 `superpowers-controller`。
+正式 npm 包名和 CLI 命令统一为 `superpowers-controller`。
 
 ```bash
-bunx opencode-superpowers-controller install
+bunx superpowers-controller install
 ```
 
 检查安装：
 
 ```bash
-bunx opencode-superpowers-controller doctor
+bunx superpowers-controller doctor
 ```
+
+也可以直接把 npm 包名加入 OpenCode 配置：
+
+```jsonc
+{
+  "$schema": "https://opencode.ai/config.json",
+  "plugin": ["superpowers-controller"]
+}
+```
+
+如果你从早期开发包升级，请把旧的 `opencode-superpowers-controller` 配置项替换为 `superpowers-controller`。
 
 ## 配置
 

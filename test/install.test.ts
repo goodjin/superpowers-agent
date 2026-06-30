@@ -16,23 +16,23 @@ describe("mergePluginEntry", () => {
 }
 `
 
-    const output = mergePluginEntry(input, "opencode-superpowers-controller")
+    const output = mergePluginEntry(input, "superpowers-controller")
 
     expect(output).toContain("// keep this comment")
     expect(output).toContain('"model": "anthropic/claude"')
     expect(output).toContain('"other-plugin"')
-    expect(output).toContain('"opencode-superpowers-controller"')
+    expect(output).toContain('"superpowers-controller"')
     expect(output).toContain('"agent"')
   })
 
   test("does not duplicate existing plugin entry", () => {
     const input = `{
-  "plugin": ["opencode-superpowers-controller"]
+  "plugin": ["superpowers-controller"]
 }
 `
 
-    const output = mergePluginEntry(input, "opencode-superpowers-controller")
-    const matches = output.match(/opencode-superpowers-controller/g) ?? []
+    const output = mergePluginEntry(input, "superpowers-controller")
+    const matches = output.match(/superpowers-controller/g) ?? []
 
     expect(matches).toHaveLength(1)
   })

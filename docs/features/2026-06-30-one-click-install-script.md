@@ -5,8 +5,8 @@
 Current installation requires users to know the package binary and run:
 
 ```bash
-bunx opencode-superpowers-controller install
-bunx opencode-superpowers-controller doctor
+bunx superpowers-controller install
+bunx superpowers-controller doctor
 ```
 
 That command updates OpenCode config and copies bundled primary skills, but it is not a full user-facing installation experience. It does not check runtime prerequisites first, does not explain what changed, and does not give users a single copy-paste command that works from a clean machine.
@@ -33,8 +33,8 @@ bash scripts/install.sh
 
 - Add `scripts/install.sh` as the user-facing installer.
 - Keep the existing TypeScript CLI installer as the source of truth for config mutation.
-- Use `bunx opencode-superpowers-controller install` for package-based installation.
-- Run `bunx opencode-superpowers-controller doctor` after installation.
+- Use `bunx superpowers-controller install` for package-based installation.
+- Run `bunx superpowers-controller doctor` after installation.
 - Print the config files touched and the command users should try next.
 - Add install docs to `README.md`.
 - Add focused tests for installer behavior where practical through existing CLI tests and package entrypoint tests.
@@ -45,7 +45,7 @@ bash scripts/install.sh
 - Do not use `scripts/deploy-superagent-runtime.sh` for normal user installs.
 - Do not modify provider auth, API keys, or model config.
 - Do not install or start the isolated `superagent` development runtime by default.
-- Do not rename the package/bin in this feature. The current executable remains `opencode-superpowers-controller`.
+- Do not rename the package/bin in this feature. Use the current executable, `superpowers-controller`.
 
 ## Installer Behavior
 
@@ -64,7 +64,7 @@ If `bun` is missing, stop with a short message and installation link guidance. A
 The script should run:
 
 ```bash
-bunx opencode-superpowers-controller install
+bunx superpowers-controller install
 ```
 
 This keeps the JSONC merge, config file selection, default plugin config, and skill-copy logic inside the existing TypeScript installer.
@@ -74,7 +74,7 @@ This keeps the JSONC merge, config file selection, default plugin config, and sk
 After install, run:
 
 ```bash
-bunx opencode-superpowers-controller doctor
+bunx superpowers-controller doctor
 ```
 
 The script should fail if doctor reports a failed plugin entry, plugin config, skills directory, or writable state directory. If only `opencode` is missing, print it as an actionable prerequisite rather than hiding the install result.
@@ -124,7 +124,7 @@ The first version does not need automatic rollback. The installer should avoid p
 ## Acceptance
 
 - `bash scripts/install.sh` completes on a machine with Bun and OpenCode available.
-- Running `bash scripts/install.sh` twice keeps only one `opencode-superpowers-controller` plugin entry.
+- Running `bash scripts/install.sh` twice keeps only one `superpowers-controller` plugin entry.
 - `bun test test/install.test.ts test/package-entrypoints.test.ts` passes.
 - `bun run build` passes.
 - `npm pack --dry-run` includes `scripts/install.sh` if the package is expected to ship the script.

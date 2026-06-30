@@ -4,6 +4,8 @@
 
 The deployment module maintains the local isolated Superagent runtime used to test the plugin without touching the user's default OpenCode install.
 
+It also documents the public package boundary for release readiness. The npm package and CLI command are `superpowers-controller`; the OpenCode plugin config entry should use the same string.
+
 ## Files
 
 - `scripts/deploy-superagent-runtime.sh`: builds the plugin, writes isolated OpenCode config, syncs skills and auth, installs the `superagent` launcher, and starts/stops/restarts the background headless server.
@@ -49,3 +51,16 @@ The generated isolated `opencode.json` sets global OpenCode permissions to `allo
 - Override the port with `SUPERAGENT_PORT=<port>`.
 - `superagent start`, `stop`, `restart`, and `status` manage only the background headless server. Run `superagent` with no arguments to open the default TUI. Run `superagent web` when the Web UI should be launched from the launcher.
 - `superagent restart` is the freshness boundary for local development: it rebuilds, rewrites runtime files, stops the previous server, and starts a new one. Exiting the TUI does not stop the background server.
+
+## Release Verification
+
+Before publishing the npm package, run:
+
+```bash
+bun run build
+bun run test
+bun run test:e2e:opencode
+npm pack --dry-run
+```
+
+The dry-run package should be named `superpowers-controller`, include `LICENSE`, ship `dist/index.js`, `dist/tui.js`, `dist/cli/index.js`, bundled primary skills, and declaration files under `dist/src/`. It should not include test declaration files.
