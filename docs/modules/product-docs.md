@@ -30,9 +30,9 @@ product docs 记录 Superpowers Controller 的产品设计版本、PRD 来源和
 `README.md` 和 `README.en.md` 面向首次了解项目的读者，结构保持一致：
 
 - 先说明 Superpowers Controller 是面向 coding agents 的任务控制插件。
-- 再说明安装后通过 `super-agent` 使用，需求准备、启动、继续、取消和节点汇报通过插件工具推进。
+- 再说明使用方式，先展示一行安装命令，再展示从源码编译安装路径，随后说明通过 `super-agent` 启动。
 - 接着解释设计理念：skills 负责方法，node agents 负责节点执行，plugin runtime 负责状态、调度、gate、恢复和审计。
-- 最后说明 agents、primary skills、核心工具、安装、配置和验证方式。
+- 最后说明执行链路、核心工具、配置和开发验证方式。
 
 README 不强调项目没有实现的入口形态或能力，避免让读者把注意力放到负向边界上。项目边界可以保留为独立项目和非上游官方插件的说明。
 
