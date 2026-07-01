@@ -85,8 +85,7 @@ describe("Superpowers TUI plugin", () => {
 
       expect(routes.map((route) => route.name).sort()).toEqual(["superpowers-progress"])
       expect(String(routes[0]?.render())).toContain("Superpowers Progress")
-      expect(commands.map((command) => command.value).sort()).toEqual(["superpowers.progress"])
-      expect(commands.map((command) => command.value)).not.toContain("superpowers.questions")
+      expect(commands).toHaveLength(0)
       expect(Object.keys(slots).sort()).toEqual([...RESIDENT_PROGRESS_SLOT_NAMES].sort())
       expect(typeof slots.sidebar_footer).toBe("function")
       expect(typeof slots.sidebar_content).toBe("function")
@@ -171,8 +170,7 @@ describe("Superpowers TUI plugin", () => {
         type: "text",
         value: "SP: sp-implementer T1 running - bash running",
       })
-      commands.find((command) => command.value === "superpowers.progress")?.onSelect?.()
-      expect(navigated).toEqual([{ name: "superpowers-progress", params: undefined }])
+      expect(navigated).toEqual([])
     } finally {
       rmSync(project, { recursive: true, force: true })
     }

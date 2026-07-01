@@ -665,10 +665,11 @@ late report rules：
 TUI surfaces 保持：
 
 - `superpowers-progress` route.
-- `superpowers.progress` command.
 - `app_bottom`.
 - `sidebar_content`.
 - `sidebar_footer` fallback.
+
+插件不注册 TUI command；用户入口统一是 OpenCode agent 列表中的 `super-agent`。
 
 v4 要求异常状态在 `sidebar_content` 中可见：
 

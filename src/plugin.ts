@@ -1,6 +1,5 @@
 import type { Plugin, PluginModule } from "@opencode-ai/plugin"
 import { createAgentConfig } from "./agents"
-import { createCommandConfig } from "./commands"
 import { loadConfig } from "./config/load"
 import { createNodeProgressStore } from "./progress/node-progress"
 import { resolveGlobalPermission } from "./config/permissions"
@@ -46,10 +45,6 @@ export function createPluginModule(): PluginModule {
         hostConfig.agent = {
           ...createAgentConfig({ globalPermission }),
           ...((hostConfig.agent as Record<string, unknown>) ?? {}),
-        }
-        hostConfig.command = {
-          ...createCommandConfig(),
-          ...((hostConfig.command as Record<string, unknown>) ?? {}),
         }
       },
       "tool.execute.before": async (input, output) => {

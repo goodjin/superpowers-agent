@@ -76,4 +76,4 @@ bun run test:e2e:opencode
 npm pack --dry-run
 ```
 
-The dry-run package should be named `superpowers-controller`, include `LICENSE`, ship `dist/index.js`, `dist/tui.js`, `dist/cli/index.js`, bundled primary skills, and declaration files under `dist/src/`. It should not include test declaration files.
+The dry-run package should be named `superpowers-controller`, include `LICENSE`, ship `dist/index.js`, `dist/tui.js`, `dist/cli/index.js`, bundled primary skills, and declaration files under `dist/src/`. It should not include command assets or test declaration files.

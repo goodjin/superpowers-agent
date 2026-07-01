@@ -53,16 +53,15 @@ docs/superpowers/specs/2026-06-11-controller-final-design.md
 这个插件把工作拆成四层：
 
 ```text
-Command -> super-agent -> Node Session -> Node Agent -> Primary Skill
-             |
-             v
-       State / Router / Gate / Session Control
+super-agent -> Node Session -> Node Agent -> Primary Skill
+      |
+      v
+State / Router / Gate / Session Control
 ```
 
 各层职责：
 
-- **Command**：用户入口，比如 `/sp-debug`、`/sp-plan`。
-- **super-agent**：主会话总控，负责确认需求、恢复状态、创建/复用子会话，不直接写代码。
+- **super-agent**：唯一用户入口。主会话总控负责确认需求、恢复状态、创建/复用子会话，不直接写代码。
 - **Node agent**：`sp-debugger`、`sp-implementer` 这类专门角色，只处理当前节点。
 - **Skill**：节点的方法说明，比如 systematic debugging、TDD、verification。
 - **Plugin state/gate/session control**：负责存状态、写 artifact、校验 gate、创建/复用会话、拦截不合规工具调用。
@@ -108,7 +107,7 @@ Agent prompt 没有整段复制 skill 内容。它是新设计的轻量角色规
 例子：
 
 ```text
-/sp-debug
+用户选择 `super-agent`
   -> super-agent 确认 debug workflow
   -> 插件创建 workflow run
   -> sp-debugger
@@ -117,25 +116,11 @@ Agent prompt 没有整段复制 skill 内容。它是新设计的轻量角色规
   -> 插件写 artifact、打开 root_cause_found gate、调度下一步
 ```
 
-如果用户在 OpenCode 里直接选择某个节点 agent，比如 `sp-debugger`，它仍然会看到自己的角色 prompt：聚焦 debug、加载 `superpowers-systematic-debugging`、结束时调用 `sp_report`。但直接选择节点 agent 会绕过 super-agent 的需求确认和恢复逻辑，所以推荐通过 `/sp` 或 `/sp-debug` 进入。
+如果用户在 OpenCode 里直接选择某个节点 agent，比如 `sp-debugger`，它仍然会看到自己的角色 prompt：聚焦 debug、加载 `superpowers-systematic-debugging`、结束时调用 `sp_report`。但直接选择节点 agent 会绕过 super-agent 的需求确认和恢复逻辑，所以用户入口统一为 `super-agent`。
 
-## Commands
+## Entrypoint
 
-Commands 以动态注入为主，不再由 installer 复制 markdown command 文件。
-
-插件注入这些 slash commands：
-
-- `/sp`
-- `/sp-prepare`
-- `/sp-design`
-- `/sp-plan`
-- `/sp-debug`
-- `/sp-execute`
-- `/sp-review`
-- `/sp-verify`
-- `/sp-cancel`
-
-这样用户 config 更干净，插件升级时 command 文案也跟着更新。
+插件不注册 slash commands。安装后在 OpenCode 中选择 `super-agent` 作为唯一入口；后续设计、计划、执行、验证、review 和恢复都通过 `super-agent` 调用 `sp_status`、`sp_prepare`、`sp_start`、`sp_cancel` 等工具推进。
 
 ## 相比直接使用 Superpowers skills 的优势
 

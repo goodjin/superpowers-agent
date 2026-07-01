@@ -39,7 +39,7 @@ describe("mergePluginEntry", () => {
     expect(matches).toHaveLength(1)
   })
 
-  test("installs skills but does not copy command assets because commands are dynamically injected", () => {
+  test("installs skills without copying command assets", () => {
     const configDir = mkdtempSync(join(tmpdir(), "sp-install-"))
 
     install(configDir)

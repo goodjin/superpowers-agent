@@ -46,16 +46,15 @@ It records:
 The workflow is split into layers:
 
 ```text
-Command -> super-agent -> Node Session -> Node Agent -> Primary Skill
-             |
-             v
-       State / Router / Gate / Session Control
+super-agent -> Node Session -> Node Agent -> Primary Skill
+      |
+      v
+State / Router / Gate / Session Control
 ```
 
 Layer responsibilities:
 
-- **Command**: user entrypoint, such as `/sp-debug` or `/sp-plan`.
-- **super-agent**: primary controller in the main session. It confirms intent, restores state, and creates or reuses child sessions. It does not write code.
+- **super-agent**: the only user-facing entrypoint. It confirms intent, restores state, and creates or reuses child sessions. It does not write code.
 - **Node agent**: focused role such as `sp-debugger` or `sp-implementer`.
 - **Skill**: node method, such as systematic debugging, TDD, or verification.
 - **Plugin state/gate/session control**: stores state, writes artifacts, validates gates, creates or reuses sessions, and intercepts unsafe tool calls.
@@ -99,7 +98,7 @@ The plugin injects runtime skill context when a workflow is active. That context
 Example:
 
 ```text
-/sp-debug
+Select `super-agent`
   -> super-agent confirms the debug workflow
   -> plugin creates the workflow run
   -> sp-debugger
@@ -108,23 +107,11 @@ Example:
   -> plugin writes the artifact, opens the root_cause_found gate, and schedules the next step
 ```
 
-If the user directly selects a node agent such as `sp-debugger`, the node agent still sees its role prompt and primary skill. Direct selection skips the controller's intent confirmation and recovery logic, so `/sp` or `/sp-debug` is the preferred entrypoint.
+If the user directly selects a node agent such as `sp-debugger`, the node agent still sees its role prompt and primary skill. Direct selection skips the controller's intent confirmation and recovery logic, so `super-agent` is the single supported user entrypoint.
 
-## Commands
+## Entrypoint
 
-Commands are dynamically injected. The installer does not copy markdown command files.
-
-Injected slash commands:
-
-- `/sp`
-- `/sp-prepare`
-- `/sp-design`
-- `/sp-plan`
-- `/sp-debug`
-- `/sp-execute`
-- `/sp-review`
-- `/sp-verify`
-- `/sp-cancel`
+The plugin does not register slash commands. After installation, select `super-agent` in OpenCode. Design, planning, execution, verification, review, cancel, and recovery flows are driven by the `super-agent` through `sp_status`, `sp_prepare`, `sp_start`, `sp_cancel`, and related tools.
 
 ## Why use this instead of skills directly?
 

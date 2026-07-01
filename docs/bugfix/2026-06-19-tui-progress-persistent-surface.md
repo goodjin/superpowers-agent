@@ -6,13 +6,13 @@
 - 严重程度: Medium
 - 影响范围: Superpowers TUI progress visibility
 
-用户要求在主会话界面展示子会话实时进度。已有实现只注册了 `superpowers-progress` route 和 `superpowers.progress` command，进度数据会被捕获和持久化，但默认 session 界面没有常驻展示区域。
+用户要求在主会话界面展示子会话实时进度。当时实现只提供了可手动打开的 `superpowers-progress` route，进度数据会被捕获和持久化，但默认 session 界面没有常驻展示区域。
 
 ## 根因分析
 
 - 问题位置: `src/tui.ts`
 - 原因: 实现把“可手动打开的 progress route”当成了“主界面实时可见”。OpenCode TUI route 不会自动显示在 session 页面；常驻展示需要注册 TUI slot。
-- 代码流程: server plugin 写入 `nodes/<node-id>/progress.jsonl`，TUI route 可读取并渲染；但 session 页面没有 `session_prompt_right` 或 `sidebar_footer` slot，因此用户不打开 command 时看不到进度。
+- 代码流程: server plugin 写入 `nodes/<node-id>/progress.jsonl`，TUI route 可读取并渲染；但 session 页面没有 `session_prompt_right` 或 `sidebar_footer` slot，因此用户不会在默认界面看到进度。
 
 ## 修复方案
 

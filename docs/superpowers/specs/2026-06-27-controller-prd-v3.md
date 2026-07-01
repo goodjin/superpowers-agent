@@ -455,10 +455,11 @@ progress 来源：
 TUI surfaces：
 
 - `superpowers-progress` route: 完整 workflow 和 node progress 面板。
-- `superpowers.progress` command: 打开 progress route。
 - `app_bottom`: 主会话底部整体状态。
 - `sidebar_content`: workflow 会话运行信息主 surface，显示 parent/child session 相关 workflow、running nodes、latest activity、pending question。
 - `sidebar_footer`: 简短状态 fallback。
+
+插件不注册 TUI command；用户入口统一是 OpenCode agent 列表中的 `super-agent`。
 
 不注册：
 
@@ -563,4 +564,3 @@ v3 替换以下 v2 口径：
 | durable running implies live running | startup reconciliation marks old running as interrupted |
 
 历史文档仍可用于追溯，但当前实现、测试和后续设计应以 v3 PRD、`docs/modules/*` 和 runtime source 为准。
-

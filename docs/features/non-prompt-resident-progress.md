@@ -10,7 +10,7 @@ The broader resident progress slot list made progress more visible, but prompt-a
 
 ## Scope
 
-- Keep the full `superpowers-progress` route and `superpowers.progress` command unchanged.
+- Keep the full `superpowers-progress` route, without registering a TUI command entry.
 - Keep compact resident progress in main-session bottom surfaces: `home_bottom` and `app_bottom`.
 - Keep sidebar fallback surfaces: `sidebar_content` and `sidebar_footer`.
 - Keep `session_prompt_right` as a short fallback indicator capped at 44 characters.

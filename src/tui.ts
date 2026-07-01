@@ -85,17 +85,6 @@ export function createTuiPluginModule() {
           }),
         ),
       })
-      if (api.command) {
-        disposers.push(api.command.register(() => [
-          {
-            title: "Superpowers Progress",
-            value: "superpowers.progress",
-            description: "Open the Superpowers Controller progress panel",
-            category: "Superpowers",
-            onSelect: () => api.route.navigate("superpowers-progress"),
-          },
-        ]))
-      }
       api.lifecycle?.onDispose(() => {
         for (const dispose of disposers) dispose()
       })

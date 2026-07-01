@@ -52,9 +52,9 @@ export function doctor(configDir = join(homedir(), ".config", "opencode"), proje
       detail: skillsDir,
     },
     {
-      name: "commands",
+      name: "entrypoint",
       ok: true,
-      detail: "dynamically injected by plugin config hook",
+      detail: "select the super-agent agent in OpenCode",
     },
     {
       name: "state-dir",
