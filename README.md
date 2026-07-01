@@ -152,7 +152,7 @@ Commands 以动态注入为主，不再由 installer 复制 markdown command 文
 
 ## 安装
 
-正式 npm 包名和 CLI 命令统一为 `superpowers-controller`。
+正式 npm 包名和 CLI 命令统一为 `superpowers-controller`。当前已验证运行环境是 OpenCode `>= 1.16.0`。
 
 一键安装：
 

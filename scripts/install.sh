@@ -34,7 +34,7 @@ run_controller() {
 doctor_allows_only_missing_opencode() {
   local output="$1"
   local failures
-  failures="$(printf '%s\n' "$output" | grep '^fail ' | grep -v '^fail opencode:' || true)"
+  failures="$(printf '%s\n' "$output" | grep '^fail ' | grep -v '^fail opencode: opencode executable not found$' || true)"
   [[ -z "$failures" ]]
 }
 

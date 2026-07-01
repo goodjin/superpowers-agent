@@ -4,6 +4,8 @@ import { dirname, join } from "node:path"
 import { spawnSync } from "node:child_process"
 import { CONFIG_FILE_NAME, LEGACY_CONFIG_FILE_NAME, PACKAGE_NAME } from "./install"
 
+export const MIN_OPENCODE_VERSION = "1.16.0"
+
 export type DoctorCheck = {
   name: string
   ok: boolean
@@ -12,6 +14,8 @@ export type DoctorCheck = {
 
 export function doctor(configDir = join(homedir(), ".config", "opencode"), projectDir = process.cwd()): DoctorCheck[] {
   const opencode = spawnSync("opencode", ["--version"], { encoding: "utf8" })
+  const opencodeVersion = opencode.status === 0 ? extractVersion(opencode.stdout) : undefined
+  const opencodeVersionOk = opencodeVersion ? compareVersions(opencodeVersion, MIN_OPENCODE_VERSION) >= 0 : false
   const configPath = existsSync(join(configDir, "opencode.jsonc")) ? join(configDir, "opencode.jsonc") : join(configDir, "opencode.json")
   const configContent = existsSync(configPath) ? readFileSync(configPath, "utf8") : ""
   const skillsDir = join(configDir, "skills")
@@ -24,8 +28,13 @@ export function doctor(configDir = join(homedir(), ".config", "opencode"), proje
   return [
     {
       name: "opencode",
-      ok: opencode.status === 0,
-      detail: opencode.status === 0 ? opencode.stdout.trim() : "opencode executable not found",
+      ok: opencode.status === 0 && opencodeVersionOk,
+      detail:
+        opencode.status !== 0
+          ? "opencode executable not found"
+          : opencodeVersionOk
+            ? opencode.stdout.trim()
+            : `${opencode.stdout.trim()} (requires >= ${MIN_OPENCODE_VERSION})`,
     },
     {
       name: "plugin-entry",
@@ -87,4 +96,18 @@ function nearestExistingPath(path: string): string {
     current = parent
   }
   return current
+}
+
+function extractVersion(output: string): string | undefined {
+  return output.match(/\d+\.\d+\.\d+/)?.[0]
+}
+
+function compareVersions(left: string, right: string): number {
+  const leftParts = left.split(".").map(Number)
+  const rightParts = right.split(".").map(Number)
+  for (let index = 0; index < Math.max(leftParts.length, rightParts.length); index += 1) {
+    const diff = (leftParts[index] ?? 0) - (rightParts[index] ?? 0)
+    if (diff !== 0) return diff
+  }
+  return 0
 }

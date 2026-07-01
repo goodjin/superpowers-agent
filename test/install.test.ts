@@ -4,6 +4,7 @@ import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { spawnSync } from "node:child_process"
 import { install, mergePluginEntry } from "../src/cli/install"
+import { doctor, MIN_OPENCODE_VERSION } from "../src/cli/doctor"
 
 describe("mergePluginEntry", () => {
   test("adds plugin entry to jsonc content while preserving user fields", () => {
@@ -115,4 +116,23 @@ describe("mergePluginEntry", () => {
     expect(readFileSync(nextConfig, "utf8")).toBe('{\n  "mode": "strict"\n}\n')
     expect(existsSync(legacyConfig)).toBe(true)
   })
+
+  test("doctor rejects OpenCode versions older than the verified runtime", () => {
+    const home = mkdtempSync(join(tmpdir(), "sp-doctor-home-"))
+    const binDir = join(home, "bin")
+    mkdirSync(binDir, { recursive: true })
+    writeFileSync(join(binDir, "opencode"), "#!/usr/bin/env bash\nprintf '1.3.10\\n'\n", { mode: 0o755 })
+    const oldPath = process.env.PATH
+    process.env.PATH = `${binDir}:${oldPath ?? ""}`
+
+    try {
+      install(join(home, ".config", "opencode"))
+      const opencodeCheck = doctor(join(home, ".config", "opencode"), home).find((check) => check.name === "opencode")
+      expect(opencodeCheck?.ok).toBe(false)
+      expect(opencodeCheck?.detail).toContain(`requires >= ${MIN_OPENCODE_VERSION}`)
+    } finally {
+      process.env.PATH = oldPath
+    }
+  })
+
 })

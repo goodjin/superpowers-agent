@@ -141,7 +141,7 @@ This plugin helps with longer, stateful, or interruptible work:
 
 ## Install
 
-The npm package name and CLI command are both `superpowers-controller`.
+The npm package name and CLI command are both `superpowers-controller`. The verified runtime requirement is OpenCode `>= 1.16.0`.
 
 One-click install:
 
