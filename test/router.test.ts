@@ -26,12 +26,12 @@ const baseState: WorkflowState = {
 }
 
 describe("routeWorkflow", () => {
-  test("explicit slash command wins over classification", () => {
+  test("legacy slash command argument no longer overrides classification", () => {
     const route = routeWorkflow({ request: "fix a crash", command: "/sp-plan" })
 
-    expect(route.mode).toBe("plan")
-    expect(route.agent).toBe("sp-planner")
-    expect(route.skills).toContain("superpowers-writing-plans")
+    expect(route.mode).toBe("debug")
+    expect(route.agent).toBe("sp-debugger")
+    expect(route.skills).toContain("superpowers-systematic-debugging")
   })
 
   test("current active state wins when waiting on a gate", () => {

@@ -2,7 +2,7 @@
 
 Superpowers Controller 是一种用 Agent 使用 Superpowers 框架的方式。
 
-安装后直接选择 `super-agent`，Agent 会按 Superpowers 框架的规则和流程执行任务，并自动使用相关 Skill，不需要手动触发。大模型负责理解任务、拆分任务和完成节点产出；插件通过程序控制各个环节的执行，维护状态、调度节点、记录结果，减少大上下文污染和注意力漂移带来的中断或流程跑偏。
+安装后默认入口会设为 `super-agent`。这个 Agent 会按 Superpowers 框架的规则和流程执行任务，并自动使用相关 Skill，不需要手动触发。大模型负责理解任务、拆分任务和完成节点产出；插件通过程序控制各个环节的执行，维护状态、调度节点、记录结果，减少大上下文污染和注意力漂移带来的中断或流程跑偏。
 
 ## 怎么使用
 
@@ -19,7 +19,13 @@ bunx superpowers-controller doctor
 opencode agent list
 ```
 
-启动时选择 `super-agent`：
+安装器会把 OpenCode 的 `default_agent` 设为 `super-agent`。之后正常启动即可：
+
+```bash
+opencode
+```
+
+也可以显式指定：
 
 ```bash
 opencode --agent super-agent
@@ -42,6 +48,8 @@ bash scripts/install.sh
 Superpowers 原本主要通过 Skill 承载工作方法。Skill 很轻，也容易扩展，但长程任务会把问题放大：同一个主会话加载太多 Skill 后，上下文变长、噪音变多；改用 subagent 可以隔离单个节点，但任务编排、结果回收、失败处理和继续推进仍会压回主会话。
 
 Superpowers Controller 把 Skill 的使用封装进 Agent 流程里。用户只选择 `super-agent`，Agent 负责按流程调用合适的 Skill；插件 runtime 负责保存 workflow state、校验 gate、记录 artifacts、调度下一步，并在重启后恢复。
+
+持久化是这套方案的关键。每次 prepare、start、report、gate、节点结果和异常状态都会落到项目本地文件里，方便中断后恢复，也方便回头跟踪任务为什么走到某一步、哪个节点提交了什么证据。
 
 可以把它看作动态工作流方案：workflow 可以由主控根据任务生成或裁剪；进入执行后，节点顺序、执行状态、结果记录和异常处理由插件接管。
 
@@ -67,6 +75,16 @@ State / Router / Gate / Session Control
 - `sp_cancel`：取消当前 workflow。
 - `sp_report`：节点 agent 提交结构化结果、证据和后续建议。
 
+内置工作流程：
+
+- `feature`：设计/计划、实现、验收、验证、代码审查、收尾。
+- `bugfix` / `debug`：先定位根因，再修复、回归验证、审查、收尾。
+- `review`：围绕已有改动做验收、验证、代码审查和收尾。
+- `verify-finish`：完成前运行新鲜验证并收口。
+- `design-only` / `plan-only` / `review-only`：只产出对应结果，默认不自动扩展到实现。
+- `parallel-investigate`：并行调查多个独立方向，再汇总。
+- `single-agent`：只派发一个指定节点，适合范围很小的任务。
+
 插件状态保存在项目本地：
 
 ```text
@@ -76,6 +94,8 @@ State / Router / Gate / Session Control
 ```
 
 ## 配置
+
+这里配置的是 Superpowers Controller 的运行策略，文件位于 OpenCode 配置目录下的 `superpowers-controller.jsonc`。它不配置模型、provider 或 API key，只控制 workflow gate、状态保留和插件行为。
 
 默认配置是 guided：遇到 gate 问题会提示，但不直接阻断。可以切到 strict：
 

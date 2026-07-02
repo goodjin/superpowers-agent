@@ -21,7 +21,7 @@ Normal users can run:
 curl -fsSL https://raw.githubusercontent.com/goodjin/superpowers-controller/main/scripts/install.sh | bash
 ```
 
-When run from this repository checkout, the script uses the local TypeScript CLI. When run from the raw GitHub URL, it uses `bunx superpowers-controller`. The script installs the plugin entry and bundled primary skills in the user's OpenCode config. It does not modify provider auth, model config, or the isolated `superagent` runtime.
+When run from this repository checkout, the script uses the local TypeScript CLI. When run from the raw GitHub URL, it uses `bunx superpowers-controller`. The script installs the plugin entry, sets OpenCode `default_agent` to `super-agent`, and copies bundled primary skills into the user's OpenCode config. It does not modify provider auth, model config, or the isolated `superagent` runtime.
 
 The installer writes `superpowers-controller.jsonc` beside the user's OpenCode config. If an older `opencode-superpowers.jsonc` exists and the new file does not, the installer copies the legacy content into `superpowers-controller.jsonc` and leaves the legacy file in place.
 

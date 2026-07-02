@@ -1,16 +1,5 @@
 import type { WorkflowMode } from "../state/types"
 
-const COMMAND_MODES: Record<string, WorkflowMode> = {
-  "/sp": "idle",
-  "/sp-design": "design",
-  "/sp-plan": "plan",
-  "/sp-debug": "debug",
-  "/sp-execute": "execute",
-  "/sp-review": "review",
-  "/sp-verify": "verify-finish",
-  "/sp-verify-finish": "verify-finish",
-}
-
 const MODE_PATTERNS: Array<{ mode: WorkflowMode; patterns: RegExp[] }> = [
   {
     mode: "parallel-investigate",
@@ -43,10 +32,7 @@ const MODE_PATTERNS: Array<{ mode: WorkflowMode; patterns: RegExp[] }> = [
 ]
 
 export function classifyRequest(request: string, command?: string): { mode: WorkflowMode; confidence: number; reason: string } {
-  const normalizedCommand = command?.trim().toLowerCase()
-  if (normalizedCommand && COMMAND_MODES[normalizedCommand]) {
-    return { mode: COMMAND_MODES[normalizedCommand], confidence: 1, reason: `explicit command ${normalizedCommand}` }
-  }
+  void command
 
   for (const candidate of MODE_PATTERNS) {
     const matched = candidate.patterns.find((pattern) => pattern.test(request))

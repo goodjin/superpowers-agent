@@ -21,7 +21,20 @@ export function mergePluginEntry(content: string, pluginEntry = PACKAGE_NAME): s
   const parsed = parse(content)
   const plugins = Array.isArray(parsed?.plugin) ? parsed.plugin.filter((entry: unknown): entry is string => typeof entry === "string") : []
   const nextPlugins = plugins.includes(pluginEntry) ? plugins : [...plugins, pluginEntry]
-  const edits = modify(content || "{}", ["plugin"], nextPlugins, {
+  let output = content || "{}"
+  const formattingOptions = { insertSpaces: true, tabSize: 2 }
+  const pluginEdits = modify(output, ["plugin"], nextPlugins, {
+    formattingOptions,
+  })
+  output = applyEdits(output, pluginEdits)
+  const defaultAgentEdits = modify(output, ["default_agent"], "super-agent", {
+    formattingOptions,
+  })
+  return applyEdits(output, defaultAgentEdits)
+}
+
+export function mergeDefaultAgent(content: string, agent = "super-agent"): string {
+  const edits = modify(content || "{}", ["default_agent"], agent, {
     formattingOptions: { insertSpaces: true, tabSize: 2 },
   })
   return applyEdits(content || "{}", edits)

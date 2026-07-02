@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFil
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { spawnSync } from "node:child_process"
-import { install, mergePluginEntry } from "../src/cli/install"
+import { install, mergeDefaultAgent, mergePluginEntry } from "../src/cli/install"
 import { doctor, MIN_OPENCODE_VERSION } from "../src/cli/doctor"
 
 describe("mergePluginEntry", () => {
@@ -24,6 +24,7 @@ describe("mergePluginEntry", () => {
     expect(output).toContain('"model": "anthropic/claude"')
     expect(output).toContain('"other-plugin"')
     expect(output).toContain('"superpowers-controller"')
+    expect(output).toContain('"default_agent": "super-agent"')
     expect(output).toContain('"agent"')
   })
 
@@ -37,6 +38,16 @@ describe("mergePluginEntry", () => {
     const matches = output.match(/superpowers-controller/g) ?? []
 
     expect(matches).toHaveLength(1)
+  })
+
+  test("sets the OpenCode default agent to super-agent", () => {
+    const output = mergeDefaultAgent(`{
+  "default_agent": "general"
+}
+`)
+
+    expect(output).toContain('"default_agent": "super-agent"')
+    expect(output).not.toContain('"general"')
   })
 
   test("installs skills without copying command assets", () => {
@@ -100,6 +111,7 @@ describe("mergePluginEntry", () => {
     const config = readFileSync(join(home, ".config", "opencode", "opencode.jsonc"), "utf8")
     const matches = config.match(/superpowers-controller/g) ?? []
     expect(matches).toHaveLength(1)
+    expect(config).toContain('"default_agent": "super-agent"')
     expect(existsSync(join(home, ".config", "opencode", "superpowers-controller.jsonc"))).toBe(true)
     expect(readdirSync(join(home, ".config", "opencode", "skills")).filter((entry) => entry.startsWith("superpowers-")).length).toBeGreaterThan(0)
   }, 30_000)

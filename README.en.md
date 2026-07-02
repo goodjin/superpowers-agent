@@ -2,7 +2,7 @@
 
 Superpowers Controller is a way to use the Superpowers framework through an Agent.
 
-After installation, select `super-agent`. The Agent follows the Superpowers rules and workflow, and automatically uses the relevant Skills without manual triggering. The model understands the request, splits the work, and produces node outputs. The plugin programmatically controls each step, maintains state, dispatches nodes, records results, and reduces interruptions or workflow drift caused by long-context noise and attention loss.
+After installation, the default entrypoint is set to `super-agent`. The Agent follows the Superpowers rules and workflow, and automatically uses the relevant Skills without manual triggering. The model understands the request, splits the work, and produces node outputs. The plugin programmatically controls each step, maintains state, dispatches nodes, records results, and reduces interruptions or workflow drift caused by long-context noise and attention loss.
 
 ## Usage
 
@@ -19,7 +19,13 @@ bunx superpowers-controller doctor
 opencode agent list
 ```
 
-Start with `super-agent`:
+The installer sets OpenCode `default_agent` to `super-agent`. Start normally:
+
+```bash
+opencode
+```
+
+You can also select it explicitly:
 
 ```bash
 opencode --agent super-agent
@@ -42,6 +48,8 @@ This local install path uses the CLI from the current checkout to write OpenCode
 The original Superpowers approach mainly carries working methods through Skills. Skills are lightweight and easy to extend, but long-running work makes the cost visible: too many Skills in one main conversation produce longer, noisier context. Subagents can isolate individual nodes, but orchestration, result collection, failure handling, and continuation still tend to fall back to the main conversation.
 
 Superpowers Controller wraps Skill usage inside an Agent flow. The user selects `super-agent`; the Agent calls the right Skill for the current step; the plugin runtime saves workflow state, validates gates, records artifacts, schedules the next step, and recovers after restarts.
+
+Persistence is part of the design. Prepare, start, report, gates, node results, and exceptional states are written to project-local files, so interrupted work can resume and later sessions can audit why the workflow moved to a given step.
 
 Think of it as a dynamic workflow implementation. The controller can generate or trim the workflow for the request. Once execution starts, node order, status, result recording, and recovery are handled by the plugin.
 
@@ -67,6 +75,16 @@ Core tools:
 - `sp_cancel`: cancel the active workflow.
 - `sp_report`: let node agents submit structured results, evidence, and follow-up suggestions.
 
+Built-in workflows:
+
+- `feature`: design/plan, implementation, acceptance, verification, code review, finish.
+- `bugfix` / `debug`: root cause first, then repair, regression verification, review, finish.
+- `review`: acceptance, verification, code review, and finish for existing changes.
+- `verify-finish`: fresh verification before final finish.
+- `design-only` / `plan-only` / `review-only`: bounded output only, with no automatic implementation expansion by default.
+- `parallel-investigate`: investigate independent directions in parallel, then summarize.
+- `single-agent`: dispatch one scoped node for small tasks.
+
 Project-local state:
 
 ```text
@@ -76,6 +94,8 @@ Project-local state:
 ```
 
 ## Configuration
+
+This config controls Superpowers Controller runtime behavior in `superpowers-controller.jsonc` under the OpenCode config directory. It does not configure models, providers, or API keys; it controls workflow gates, state retention, and plugin behavior.
 
 Default mode is guided: gate issues are reported but not blocked. You can make individual gates strict:
 

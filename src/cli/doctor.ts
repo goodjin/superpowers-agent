@@ -2,6 +2,7 @@ import { accessSync, constants, existsSync, readdirSync, readFileSync } from "no
 import { homedir } from "node:os"
 import { dirname, join } from "node:path"
 import { spawnSync } from "node:child_process"
+import { parse } from "jsonc-parser"
 import { CONFIG_FILE_NAME, LEGACY_CONFIG_FILE_NAME, PACKAGE_NAME } from "./install"
 
 export const MIN_OPENCODE_VERSION = "1.16.0"
@@ -18,6 +19,7 @@ export function doctor(configDir = join(homedir(), ".config", "opencode"), proje
   const opencodeVersionOk = opencodeVersion ? compareVersions(opencodeVersion, MIN_OPENCODE_VERSION) >= 0 : false
   const configPath = existsSync(join(configDir, "opencode.jsonc")) ? join(configDir, "opencode.jsonc") : join(configDir, "opencode.json")
   const configContent = existsSync(configPath) ? readFileSync(configPath, "utf8") : ""
+  const parsedConfig = parse(configContent || "{}")
   const skillsDir = join(configDir, "skills")
   const stateDir = join(projectDir, ".opencode", "superpowers")
   const pluginConfigPath = join(configDir, CONFIG_FILE_NAME)
@@ -40,6 +42,11 @@ export function doctor(configDir = join(homedir(), ".config", "opencode"), proje
       name: "plugin-entry",
       ok: configContent.includes(PACKAGE_NAME),
       detail: configPath,
+    },
+    {
+      name: "default-agent",
+      ok: parsedConfig?.default_agent === "super-agent",
+      detail: "default_agent should be super-agent",
     },
     {
       name: "plugin-config",
